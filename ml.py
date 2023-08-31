@@ -12,7 +12,8 @@ from features import FEATURE_SETS
 def run_experiments(data_labels, master_df, sdss_df, feature_sets):
     # Define experiments, single for each survey, and one concatenating all features
     to_process = [[data_label] for data_label in data_labels]
-    to_process.append(data_labels)
+    if len(data_labels) > 1:
+        to_process.append(data_labels)
 
     # Take all features together to make a subset
     max_features = np.concatenate([FEATURE_SETS[label] for label in data_labels])
@@ -42,8 +43,7 @@ def run_experiments(data_labels, master_df, sdss_df, feature_sets):
     classifiers = {}
 
     # Iterate over feature sets
-    for feature_names in tqdm(to_process):        
-
+    for feature_names in tqdm(to_process):
         # Extract features
         features = np.concatenate([feature_sets[feature_name] for feature_name in feature_names])
         X_train = df_train[features]
@@ -60,7 +60,7 @@ def run_experiments(data_labels, master_df, sdss_df, feature_sets):
         features_label = ' + '.join(feature_names)
         results['y_pred {}'.format(features_label)] = y_pred
         classifiers[features_label] = clf
-    
+
     return results, classifiers
 
 
@@ -68,6 +68,6 @@ def get_embedding(data, perplexity=30.0, n_iter=5000):
     X = MinMaxScaler().fit_transform(data)
     X_embedded = TSNE(n_components=2, perplexity=perplexity, early_exaggeration=12.0, learning_rate=200.0,
                       n_iter=n_iter, n_iter_without_progress=300, min_grad_norm=1e-07, metric='euclidean',
-                      init='random', verbose=10, random_state=8364, method='barnes_hut', angle=0.5,
+                      init='random', verbose=0, random_state=8364, method='barnes_hut', angle=0.5,
                       n_jobs=48).fit_transform(X)
     return X_embedded

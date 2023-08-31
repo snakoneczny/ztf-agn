@@ -6,7 +6,8 @@ from penquins import Kowalski
 
 sys.path.append('..')
 from env_config import DATA_PATH
-from data import read_sdss, get_ztf_kowalski
+from data import read_sdss
+from ztf import get_ztf_kowalski
 
 sdss_data = read_sdss(dr=18, clean=True)
 

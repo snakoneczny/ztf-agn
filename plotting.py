@@ -4,33 +4,39 @@ from matplotlib import dates as mdates
 import seaborn as sns
 from astropy import time
 
+from features import FEATURE_SETS
 
 FILTER_COLORS = {'g': 'C2', 'r': 'C3', 'i': 'C4'}
 
 
-def plot_embedding(embedding, labels, sublabels, features, n_obs):
+def plot_embedding(data, feature_labels):
+    # Get subset of input data for which given embedding exists
+    feature_label = '_'.join(feature_labels)
+    data_subset = data.dropna(subset=['t-sne_0_{}'.format(feature_label)])
+
+    # Extract the most important things
+    x, y = data_subset['t-sne_0_{}'.format(feature_label)], data_subset['t-sne_1_{}'.format(feature_label)]
+    labels = data_subset['CLASS']
+
     # Main classes
-    sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=labels)
-
-    # Sublasses for each main class
-    for cls in ['GALAXY', 'QSO', 'STAR']:
-        plt.figure()
-        idx = np.where(labels == cls)[0]
-        sns.scatterplot(x=embedding[idx, 0], y=embedding[idx, 1], hue=sublabels.loc[idx])
-
-    # AGN only
-    plt.figure()
-    hue = ['AGN' if (labels[i] == 'AGN') else 'other' for i in range(len(labels))]
-    sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=hue)
+    classes = labels.unique()
+    if len(classes) > 1:
+        sns.scatterplot(x=x, y=y, hue=labels)
 
     # Magnitude
     plt.figure()
-    mag_col = 'percentile_50_g' if 'percentile_50_g' in features else 'median'
-    sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=features[mag_col])
+    sns.scatterplot(x=x, y=y, hue=data_subset['median'])
 
     # Number of observations
     plt.figure()
-    sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=n_obs)
+    sns.scatterplot(x=x, y=y, hue=data_subset['n_obs'])
+
+    # Sublasses for each main class
+    for cls in classes:
+        plt.figure()
+        idx = (labels == cls)
+        sns.scatterplot(x=x.loc[idx], y=y.loc[idx], hue=data_subset['SUBCLASS'].loc[idx])
+        plt.title(cls)
 
 
 def plot_light_curve(lc_dict):
@@ -38,7 +44,8 @@ def plot_light_curve(lc_dict):
     filter = lc_dict['filter']
 
     fig, ax = plt.subplots()
-    ax.errorbar(dates, lc_dict['mag'], yerr=lc_dict['magerr'], fmt='o', markersize=0.7)  # , color=FILTER_COLORS[filter])
+    ax.errorbar(dates, lc_dict['mag'], yerr=lc_dict['magerr'], fmt='o',
+                markersize=0.7)  # , color=FILTER_COLORS[filter])
 
     ax.invert_yaxis()
     ax.set_ylabel('magnitude {}'.format(filter))

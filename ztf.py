@@ -3,7 +3,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 from tqdm import tqdm_notebook, tqdm
-from ztfquery import lightcurve
+# from ztfquery import lightcurve
 from penquins import Kowalski
 
 

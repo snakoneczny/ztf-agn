@@ -6,7 +6,7 @@ from penquins import Kowalski
 
 sys.path.append('..')
 from env_config import DATA_PATH
-from data import get_ztf_features
+from ztf import get_ztf_features
 
 
 to_process = [

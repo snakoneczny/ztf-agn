@@ -6,7 +6,8 @@ from penquins import Kowalski
 
 sys.path.append('..')
 from env_config import DATA_PATH
-from data import ZTF_FILTER_NAMES, get_ztf_kowalski_fields
+from data import ZTF_FILTER_NAMES
+from ztf import get_ztf_kowalski_fields
 
 
 field_ids = [296, 297, 423, 424, 487, 488, 562, 563, 682, 683, 699, 700, 717, 718, 777, 778, 841, 842, 852, 853]

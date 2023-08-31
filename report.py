@@ -82,16 +82,18 @@ def get_feature_labels(columns):
     return [column[7:] for column in columns if len(column) > 6 and column[:6] == 'y_pred']
 
 
-def make_report(results_df, clf=None, features=None):
+def make_report(results_df, clf=None, features=None, label=None):
+    y_pred_column = 'y_pred {}'.format(label) if label else 'y_pred'
+
     # Classification metrics and confusion matrix
     y_test = results_df['y_true']
-    y_pred = results_df['y_pred']
+    y_pred = results_df[y_pred_column]
     print(classification_report(y_test, y_pred, digits=4, output_dict=False))
     if clf:
         plot_confusion_matrix(y_test, y_pred, clf.classes_)
 
     # Plot results as functions of magnitude and redshift
-    results_df['classification outcome'] = results_df.apply(get_clf_label, axis=1)
+    results_df['classification outcome'] = results_df.apply(get_clf_label, args=(y_pred_column,), axis=1)
     data = results_df.dropna(subset=['classification outcome'])
     data = data.loc[(data['redshift'] < 5) & (data['mag_median'] > 16)]
 
@@ -100,7 +102,7 @@ def make_report(results_df, clf=None, features=None):
         hue_order = ['TP: QSO', 'FN: galaxy', 'FN: star', 'FP: galaxy', 'FP: star']
         sns.histplot(
             data, x=x, hue='classification outcome', element='step', fill=False,
-            log_scale=[False, True], hue_order=hue_order
+            log_scale=[False, True], hue_order=hue_order,
         )
 
         if x == 'mag_median':
@@ -116,7 +118,8 @@ def make_report(results_df, clf=None, features=None):
         plot_feature_ranking(clf, features, n_features=15, n_top_offsets=1)
 
 
-def get_clf_label(row):
+def get_clf_label(row, y_pred_column=None):
+    y_pred_column = y_pred_column if y_pred_column else 'y_pred'
     labels = [
         ('TP: QSO', 'QSO', 'QSO'),
         ('FN: galaxy', 'QSO', 'GALAXY'),
@@ -125,7 +128,7 @@ def get_clf_label(row):
         ('FP: star', 'STAR', 'QSO'),
     ]
     for clf_label, y_true, y_pred in labels:
-        if (row['y_true'] == y_true) & (row['y_pred'] == y_pred):
+        if (row['y_true'] == y_true) & (row[y_pred_column] == y_pred):
             return clf_label
     return None
 

@@ -4,11 +4,10 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from ASTROMER.models import SingleBandEncoder
 
 from env_config import PROJECT_PATH
-
 
 FEATURE_SETS = {
     'ZTF': [
@@ -24,7 +23,15 @@ FEATURE_SETS = {
         # 'dmdt',
         # 'features_present',  'mean_ztf_alert_braai',
     ],
-    'astromer': pd.read_csv(os.path.join(PROJECT_PATH, 'outputs/feature_importance/RF_astromer.csv')).loc[:256,
+    'astromer_all': np.concatenate((
+        ['astromer_{}_p{}'.format(att, p) for att in range(256) for p in [0, 2, 16, 50, 84, 98, 100]],
+        ['astromer_{}_mean'.format(att) for att in range(256)],
+        ['astromer_{}_sum'.format(att) for att in range(256)],
+    )),
+    'astromer_min-max':
+        ['astromer_{}_p{}'.format(att, p) for att in range(256) for p in [0, 2, 98, 100]],
+    'astromer_top_clf': pd.read_csv(
+        os.path.join(PROJECT_PATH, 'outputs/feature_importance/astromer_retrained-encoder_RF.csv')).loc[:256,
                 'feature'].values,
     'WISE': [
         'AllWISE__w1mpro', 'AllWISE__w2mpro', 'AllWISE__w3mpro', 'AllWISE__w4mpro',
@@ -72,11 +79,17 @@ def get_features(data, with_variability=False):
     return pd.DataFrame(features)
 
 
-def get_astromer_features(ztf_data):
+def get_astromer_features(ztf_data, retrained=None):
     percentiles = [0, 2, 16, 50, 84, 98, 100]
 
     model = SingleBandEncoder()
     model = model.from_pretraining('ztfg')
+
+    if retrained:
+        if retrained == 'QSO':
+            model.load_weights(os.path.join(PROJECT_PATH, 'outputs/models/astromer_g__QSO'))
+        else:
+            model.load_weights(os.path.join(PROJECT_PATH, 'outputs/models/astromer_g'))
 
     train_vectors = [np.array([[ztf_data[i]['mjd'][j], ztf_data[i]['mag'][j], ztf_data[i]['magerr'][j]] for j in
                                range(len(ztf_data[i]['mjd']))]) for i in tqdm(range(len(ztf_data)))]
@@ -87,14 +100,18 @@ def get_astromer_features(ztf_data):
     chunk_size = 10
     chunks = [train_vectors[i:i + chunk_size] for i in range(0, len(train_vectors), chunk_size)]
 
-    # attention_vectors = da.zeros(shape=(321929, 200, 256), chunks=(100, 200, 256), dtype=np.float64)
     features = []
-    # attention_vectors = np.empty((len(ztf_data), 200, 256), dtype=np.float64)
-    # i = 0
     for chunk in tqdm(chunks):
         tmp = model.encode(chunk, batch_size=chunk_size, concatenate=True)
         assert np.all([tmp[j].shape[0] == chunk[j].shape[0] for j in range(len(chunk))])
+
+        # Add percentiles
         f = [np.percentile(row, percentiles, axis=0).flatten(order='F') for row in tmp]
+
+        # Add sum and mean
+        for i in range(len(f)):
+            f[i] = np.concatenate((f[i], np.mean(tmp[i], axis=0), np.sum(tmp[i], axis=0)))
+
         features.extend(f)
         # for j in range(len(tmp)):
         # Dimensions: light curves, observations in a light curve, number of attention layers
