@@ -33,6 +33,7 @@ FEATURE_SETS = {
     'astromer_top_clf': pd.read_csv(
         os.path.join(PROJECT_PATH, 'outputs/feature_importance/astromer_retrained-encoder_RF.csv')).loc[:256,
                 'feature'].values,
+    'astrm_clf': ['astrm_galaxy', 'astrm_qso', 'astrm_star'],
     'WISE': [
         'AllWISE__w1mpro', 'AllWISE__w2mpro', 'AllWISE__w3mpro', 'AllWISE__w4mpro',
         # 'AllWISE__ph_qual',

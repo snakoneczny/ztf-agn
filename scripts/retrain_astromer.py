@@ -11,8 +11,8 @@ from ASTROMER.preprocessing import load_numpy
 sys.path.append('..')
 from env_config import DATA_PATH, PROJECT_PATH
 
-filter = 'g'
-output_weight_path = 'outputs/models/astromer_g'
+filter = 'r'
+output_weight_path = 'outputs/models/astromer_{}'.format(filter)
 
 batch_size = 32
 
@@ -47,7 +47,7 @@ y = sdss_x_ztf_features['CLASS'].apply(lambda x: class_dict[x]).to_numpy()
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
 train_batches = load_numpy(
-    X_train, labels=y_train, batch_size=batch_size, shuffle=True, sampling=False, max_obs=200,
+    X_train, labels=y_train, batch_size=batch_size, shuffle=True, sampling=True, max_obs=200,
     msk_frac=0.5, rnd_frac=0.1, same_frac=0.1, repeat=1,
 )
 

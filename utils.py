@@ -19,7 +19,8 @@ class struct(object):
 
 def pretty_print(x):
     pretty_dict = {
-        'mag_median': 'median magnitude'
+        'n_obs': 'number of observations',
+        'mag_median': 'median magnitude',
     }
     if x in pretty_dict:
         return pretty_dict[x]

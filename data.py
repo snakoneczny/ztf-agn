@@ -1,11 +1,12 @@
 import os
 import pickle
 
+from env_config import DATA_PATH
 from utils import read_fits_to_pandas
 
 ZTF_FILTER_NAMES = {1: 'g', 2: 'r', 3: 'i'}
 
-COLUMNS_SDSS = ['PLUG_RA', 'PLUG_DEC', 'CLASS', 'SUBCLASS', 'Z', 'Z_ERR', 'ZWARNING']
+COLUMNS_SDSS = ['OBJID', 'PLUG_RA', 'PLUG_DEC', 'CLASS', 'SUBCLASS', 'Z', 'Z_ERR', 'ZWARNING']
 
 
 def read_ztf_fields(filter):

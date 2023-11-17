@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 from tqdm.notebook import tqdm
@@ -6,17 +8,24 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
 
+from env_config import PROJECT_PATH
 from features import FEATURE_SETS
 
 
 def run_experiments(data_labels, master_df, sdss_df, feature_sets):
+    reduced_data_labels = [label for label in data_labels if label != 'astrm_clf']
     # Define experiments, single for each survey, and one concatenating all features
     to_process = [[data_label] for data_label in data_labels]
+
+    # TODO: delete
+    to_process.append(['astrm_clf', 'PS'])
+    to_process.append(['ZTF', 'astrm_clf'])
+
     if len(data_labels) > 1:
         to_process.append(data_labels)
 
     # Take all features together to make a subset
-    max_features = np.concatenate([FEATURE_SETS[label] for label in data_labels])
+    max_features = np.concatenate([FEATURE_SETS[label] for label in reduced_data_labels])
 
     # Generate indices of common rows for all experiments
     reduced_df = master_df.dropna(subset=max_features)
@@ -32,6 +41,18 @@ def run_experiments(data_labels, master_df, sdss_df, feature_sets):
     )
     y_train = sdss_train['CLASS']
     y_test = sdss_test['CLASS']
+    
+    # TODO: use train/test split indices to add those features to the main dataframe, somewhere earlier, in a function
+    # Add astromer classification features to the train and test data frames
+    for df_label, df_exp in [('train', df_train), ('val', df_test)]:
+        data_label = '_'.join(reduced_data_labels)
+        file_name = 'outputs/preds/g-band__{}__astromer_FC-1024-512-256__non-shuffle__{}.csv'.format(data_label, df_label)
+        file_path = os.path.join(PROJECT_PATH, file_name)
+        if os.path.exists(file_path):
+            df_preds = pd.read_csv(file_path)
+            df_exp['astrm_galaxy'] = df_preds['GALAXY'].to_list()
+            df_exp['astrm_qso'] = df_preds['QSO'].to_list()
+            df_exp['astrm_star'] = df_preds['STAR'].to_list()
 
     # Add things which are common to all feature set experiments
     results = pd.DataFrame()

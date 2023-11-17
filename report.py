@@ -3,7 +3,9 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm.notebook import tqdm
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, accuracy_score, \
+                            f1_score
+
 
 from utils import pretty_print
 
@@ -97,7 +99,41 @@ def make_report(results_df, clf=None, features=None, label=None):
     data = results_df.dropna(subset=['classification outcome'])
     data = data.loc[(data['redshift'] < 5) & (data['mag_median'] > 16)]
 
-    for x in ['redshift', 'mag_median']:
+    for x in ['n_obs', 'mag_median', 'redshift']:
+        # Plot accuracy, precision, recall
+        plt.figure()
+        min, max = results_df[x].min(), results_df[x].max()
+        n_bins = 20
+        bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x == 'n_obs' else np.linspace(min, max, n_bins)
+        mid_points = np.array([(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)])
+        results_df['bin'] = pd.cut(results_df[x], bins, include_lowest=True)
+        groups = results_df.groupby('bin')
+        acc = groups.apply(lambda x: accuracy_score(x['y_true'], x[y_pred_column]))
+        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None,
+                                                 labels=['GALAXY', 'QSO', 'STAR'], zero_division=0)[1])
+        n_qso = groups.apply(lambda x: x.loc[x['y_true'] == 'QSO'].shape[0])
+
+        # Plot only bins with enough number of QSOs
+        mask = n_qso >= 10
+        mid_points, acc, qso_f1, n_qso = mid_points[mask], acc[mask], qso_f1[mask], n_qso[mask]
+
+        # Transfer n_obj into zero one
+        n_qso = (n_qso - n_qso.min()) / n_qso.max()
+        # Transfer n_obj into range of scores
+        min = np.min([acc.min(), qso_f1.min()])
+        max = np.max([acc.max(), qso_f1.max()])
+        n_qso = (n_qso * (max - min)) + min
+
+        plt.plot(mid_points, acc, label='3-class accuracy', alpha=0.9)
+        plt.plot(mid_points, qso_f1, label='QSO F1', alpha=0.9)
+        plt.plot(mid_points, n_qso, label='QSO distribution', color='grey', alpha=0.6)
+        plt.xlabel(pretty_print(x))
+        if x == 'n_obs':
+            plt.xscale('log')
+        plt.legend()
+        plt.show()
+
+        # Plot histograms of classification outcome
         plt.figure()
         hue_order = ['TP: QSO', 'FN: galaxy', 'FN: star', 'FP: galaxy', 'FP: star']
         sns.histplot(
@@ -105,10 +141,12 @@ def make_report(results_df, clf=None, features=None, label=None):
             log_scale=[False, True], hue_order=hue_order,
         )
 
-        if x == 'mag_median':
-            plt.xlim([16, 22])
-        else:
-            plt.xlim([0, 5])
+        xlim_dict = {
+            'n_obs': None,
+            'mag_median': [16, 22],
+            'redshift': [0, 5],
+        }
+        plt.xlim(xlim_dict[x])
         plt.xlabel(pretty_print(x))
         plt.ylabel('counts per bin')
         plt.show()
