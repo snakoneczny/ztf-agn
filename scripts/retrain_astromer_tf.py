@@ -19,19 +19,32 @@ from tensorflow.keras.optimizers import Adam
 
 sys.path.append('..')
 from env_config import DATA_PATH, PROJECT_PATH
-from features import FEATURE_SETS, add_colors
+from features import FEATURES_DICT, add_colors
 from astromer_preprocessing import load_numpy
 
 parser = argparse.ArgumentParser()
+parser.add_argument('-f', '--filter', dest='filter', help='ZTF filter, either g or r', required=True)
+parser.add_argument('-p', '--ps', dest='is_ps', help='Flag wether use cross-match with PS', action='store_true')
+parser.add_argument('-w', '--wise', dest='is_wise', help='Flag wether use cross-match with WISE', action='store_true')
+parser.add_argument('-g', '--gaia', dest='is_gaia', help='Flag wether use cross-match with GAIA', action='store_true')
 parser.add_argument('-t', '--tag', dest='tag', help='tag, added as a suffix to the experiment name')
+parser.add_argument('--test', dest='is_test', help='Flag on test running', action='store_true')
 args = parser.parse_args()
 
 # Flag for reduced data processing
-is_test = False
+is_test = args.is_test
 
 # Training params
-filter = 'g'
-data_subsets = ['ZTF', 'PS']
+filter = args.filter
+
+data_subsets = ['ZTF']  # ZTF, PS, WISE
+if args.is_ps:
+    data_subsets.append('PS')
+if args.is_wise:
+    data_subsets.append('WISE')
+if args.is_gaia:
+    data_subsets.append('GAIA')
+
 feature_labels = []  # ZTF, PS, WISE
 data_label = '_'.join(data_subsets)
 feature_label = 'ftrs_' + '_'.join(feature_labels)
@@ -42,12 +55,13 @@ early_stopping = 20
 model_type = 'FC'
 
 experiment_name = '{}-band__{}__astromer_FC-1024-512-256'.format(filter, data_label)
+# experiment_name = '{}__LSTM-256-256'.format(data_label)
+# experiment_name = '{}__CNN-16-32-64-64_FC-1024-512-256'.format(data_label)
+
 if len(feature_labels) > 0:
     experiment_name += '__{}'.format(feature_label)
 if args.tag:
     experiment_name += '__{}'.format(args.tag)
-# experiment_name = '{}__LSTM-256-256'.format(data_label)
-# experiment_name = '{}__CNN-16-32-64-64_FC-1024-512-256'.format(data_label)
 
 
 def get_convo_layers(placeholder, encoder=None, n_classes=3, maxlen=200):
@@ -117,7 +131,7 @@ def get_lstm_layers(placeholder, encoder=None, n_classes=3, maxlen=200):
 
 def get_fc_layers(placeholder, encoder=None, n_classes=3):
     mask = 1. - placeholder['mask_in']
-    x = encoder(placeholder, training=False)
+    x = encoder(placeholder, training=False)  # training flag here controls the dropout
     x = x * mask
 
     x = tf.reduce_sum(x, 1) / tf.reduce_sum(mask, 1)
@@ -168,8 +182,8 @@ def build_model(model_type, encoder=None, n_classes=3, maxlen=200, n_features=No
     return classifier
 
 
-# Read ZTF x SDSS lighcurves with available features
-file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc_reduced'.format(filter)
+# Read ZTF x SDSS lightcurves with available features
+file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter)
 with open(os.path.join(DATA_PATH, file_path), 'rb') as file:
     ztf_x_sdss_reduced = pickle.load(file)
 
@@ -185,7 +199,7 @@ with open(os.path.join(DATA_PATH, fp), 'rb') as file:
     sdss_x_ztf_features = pickle.load(file)
 
 # Take subset with features
-features_list = np.concatenate([FEATURE_SETS[label] for label in data_subsets])
+features_list = np.concatenate([FEATURES_DICT[label] for label in data_subsets])
 ztf_x_sdss_features = ztf_x_sdss_features.dropna(subset=features_list)
 indices = ztf_x_sdss_features.index
 ztf_x_sdss_features = ztf_x_sdss_features.reset_index(drop=True)
@@ -197,8 +211,8 @@ to_process = ztf_x_sdss_reduced[:1000] if is_test else ztf_x_sdss_reduced
 X = [np.array([np.array([lc_dict['mjd'][i], lc_dict['mag'][i], lc_dict['magerr'][i]], dtype='object') for i in
                range(len(lc_dict['mjd']))], dtype='object') for lc_dict in tqdm(to_process)]
 
-ztf_x_sdss_features, feature_sets = add_colors(ztf_x_sdss_features)
-# X_features = ztf_x_sdss_features[np.concatenate([FEATURE_SETS[label] for label in feature_labels])]
+# ztf_x_sdss_features, feature_sets = add_colors(ztf_x_sdss_features)
+# X_features = ztf_x_sdss_features[np.concatenate([feature_sets[label] for label in feature_labels])]
 
 class_dict = {
     'GALAXY': 0,
@@ -226,7 +240,7 @@ X_train, X_val, y_train, y_val = train_test_split(
 # Load weights finetuned to our data
 astromer = SingleBandEncoder()
 astromer = astromer.from_pretraining('ztfg')
-astromer.load_weights(os.path.join(PROJECT_PATH, 'outputs/models/astromer_g'))
+astromer.load_weights(os.path.join(PROJECT_PATH, 'outputs/models/astromer_{}'.format(filter)))
 
 # Create TF model
 astromer_encoder = astromer.model.get_layer('encoder')

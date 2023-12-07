@@ -17,7 +17,7 @@ output_weight_path = 'outputs/models/astromer_{}'.format(filter)
 batch_size = 32
 
 # Read ZTF x SDSS lightcurves subset with available features
-file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc_reduced'.format(filter)
+file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter)
 with open(os.path.join(DATA_PATH, file_path), 'rb') as file:
     ztf_x_sdss_reduced = pickle.load(file)
 

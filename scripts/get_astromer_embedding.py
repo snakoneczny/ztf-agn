@@ -21,7 +21,6 @@ sys.stdout = open(os.devnull, 'w')
 attention_vectors = get_astromer_embedding(ztf_x_sdss_reduced)
 sys.stdout = sys.__stdout__
 
-
 # file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_g__features_astromer-att.h5'
 # da.to_hdf5(os.path.join(DATA_PATH, file_path), '/data', att)
 

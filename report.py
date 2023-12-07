@@ -6,7 +6,6 @@ from tqdm.notebook import tqdm
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, accuracy_score, \
                             f1_score
 
-
 from utils import pretty_print
 
 
@@ -64,19 +63,19 @@ def get_summary_table(results_df, data_label=None):
     return df
 
 
-def make_reports(results_df, classifiers_dict, feature_sets):
+def make_reports(results_df_dict, feature_importance_dict, filter, data_label):
+    results_df = results_df_dict[filter][data_label]
+    feature_importance_dict = feature_importance_dict[filter][data_label]
+
     features_labels = get_feature_labels(results_df.columns)
     for features_label in features_labels:
         print('features: {}'.format(features_label))
 
         # Make single report
-        clf = classifiers_dict[features_label]
         results_df['y_pred'] = results_df['y_pred {}'.format(features_label)]
 
-        feature_names = features_label.split(' + ')
-        features = np.concatenate([feature_sets[feature_name] for feature_name in feature_names])
-
-        make_report(results_df, clf, features)
+        feature_importance = feature_importance_dict[features_label] if features_label in feature_importance_dict else None
+        make_report(results_df, feature_importance)
         print('--------------------')
 
 
@@ -84,77 +83,95 @@ def get_feature_labels(columns):
     return [column[7:] for column in columns if len(column) > 6 and column[:6] == 'y_pred']
 
 
-def make_report(results_df, clf=None, features=None, label=None):
+def make_report(results_df, feature_importances=None, label=None):
     y_pred_column = 'y_pred {}'.format(label) if label else 'y_pred'
+    feature_importances = feature_importances[label] if label else feature_importances
 
     # Classification metrics and confusion matrix
     y_test = results_df['y_true']
     y_pred = results_df[y_pred_column]
     print(classification_report(y_test, y_pred, digits=4, output_dict=False))
-    if clf:
-        plot_confusion_matrix(y_test, y_pred, clf.classes_)
+    plot_confusion_matrix(y_test, y_pred, ['GALAXY', 'QSO', 'STAR'])
 
-    # Plot results as functions of magnitude and redshift
-    results_df['classification outcome'] = results_df.apply(get_clf_label, args=(y_pred_column,), axis=1)
-    data = results_df.dropna(subset=['classification outcome'])
-    data = data.loc[(data['redshift'] < 5) & (data['mag_median'] > 16)]
+    # Plot results as functions of magnitude, redshift and number of observations
+    # for x in ['n_obs', 'mag_median', 'redshift']:
+    #     plot_results_as_function(results_df, x='n_obs', labels=[y_pred_column], with_accuracy=True)
 
-    for x in ['n_obs', 'mag_median', 'redshift']:
-        # Plot accuracy, precision, recall
-        plt.figure()
-        min, max = results_df[x].min(), results_df[x].max()
-        n_bins = 20
-        bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x == 'n_obs' else np.linspace(min, max, n_bins)
-        mid_points = np.array([(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)])
-        results_df['bin'] = pd.cut(results_df[x], bins, include_lowest=True)
-        groups = results_df.groupby('bin')
-        acc = groups.apply(lambda x: accuracy_score(x['y_true'], x[y_pred_column]))
-        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None,
-                                                 labels=['GALAXY', 'QSO', 'STAR'], zero_division=0)[1])
-        n_qso = groups.apply(lambda x: x.loc[x['y_true'] == 'QSO'].shape[0])
+    # Plot histograms of T/F P/N as functions of magnitude, redshift and number of observations
+    # results_df['classification outcome'] = results_df.apply(get_clf_label, args=(y_pred_column,), axis=1)
+    # data = results_df.dropna(subset=['classification outcome'])
+    # data = data.loc[(data['redshift'] < 5) & (data['mag_median'] > 16)]
 
-        # Plot only bins with enough number of QSOs
-        mask = n_qso >= 10
-        mid_points, acc, qso_f1, n_qso = mid_points[mask], acc[mask], qso_f1[mask], n_qso[mask]
+    # plt.figure()
+    # hue_order = ['TP: QSO', 'FN: galaxy', 'FN: star', 'FP: galaxy', 'FP: star']
+    # sns.histplot(
+    #     data, x=x, hue='classification outcome', element='step', fill=False,
+    #     log_scale=[False, True], hue_order=hue_order,
+    # )
 
-        # Transfer n_obj into zero one
-        n_qso = (n_qso - n_qso.min()) / n_qso.max()
-        # Transfer n_obj into range of scores
-        min = np.min([acc.min(), qso_f1.min()])
-        max = np.max([acc.max(), qso_f1.max()])
-        n_qso = (n_qso * (max - min)) + min
-
-        plt.plot(mid_points, acc, label='3-class accuracy', alpha=0.9)
-        plt.plot(mid_points, qso_f1, label='QSO F1', alpha=0.9)
-        plt.plot(mid_points, n_qso, label='QSO distribution', color='grey', alpha=0.6)
-        plt.xlabel(pretty_print(x))
-        if x == 'n_obs':
-            plt.xscale('log')
-        plt.legend()
-        plt.show()
-
-        # Plot histograms of classification outcome
-        plt.figure()
-        hue_order = ['TP: QSO', 'FN: galaxy', 'FN: star', 'FP: galaxy', 'FP: star']
-        sns.histplot(
-            data, x=x, hue='classification outcome', element='step', fill=False,
-            log_scale=[False, True], hue_order=hue_order,
-        )
-
-        xlim_dict = {
-            'n_obs': None,
-            'mag_median': [16, 22],
-            'redshift': [0, 5],
-        }
-        plt.xlim(xlim_dict[x])
-        plt.xlabel(pretty_print(x))
-        plt.ylabel('counts per bin')
-        plt.show()
+    # xlim_dict = {
+    #     'n_obs': None,
+    #     'mag_median': [16, 22],
+    #     'redshift': [0, 5],
+    # }
+    # plt.xlim(xlim_dict[x])
+    # plt.xlabel(pretty_print(x))
+    # plt.ylabel('counts per bin')
+    # plt.show()
 
     # Feature importance
-    if not clf is None and not features is None:
-        plot_feature_ranking(clf, features, n_features=15, n_top_offsets=1)
+    if feature_importances is not None:
+        plot_feature_ranking(feature_importances['features'], feature_importances['importances'],
+                             n_features=15, n_top_offsets=1)
 
+
+def plot_results_as_function(results_df, x, labels, with_accuracy=False):
+    plt.figure()
+
+    # Make bins and get number of quasars in bins
+    min, max = results_df[x].min(), results_df[x].max()
+    n_bins = 20
+    bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x == 'n_obs' else np.linspace(min, max, n_bins)
+    mid_points = np.array([(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)])
+    results_df['bin'] = pd.cut(results_df[x], bins, include_lowest=True)
+    groups = results_df.groupby('bin')
+    n_qso = groups.apply(lambda x: x.loc[x['y_true'] == 'QSO'].shape[0])
+
+    # Make mask based on number of quasars
+    mask = n_qso >= 10
+    mid_points = mid_points[mask]
+
+    min, max = 1, 0
+    for y_pred_column in labels:
+        acc = groups.apply(lambda x: accuracy_score(x['y_true'], x[y_pred_column]))
+        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None,
+                                                    labels=['GALAXY', 'QSO', 'STAR'], zero_division=0)[1])
+
+        # Plot only bins with enough number of QSOs
+        acc, qso_f1 = acc[mask], qso_f1[mask]
+
+        # Update minimum and maxium plotted values
+        min = np.min([min, acc.min(), qso_f1.min()]) if with_accuracy else np.min([min, qso_f1.min()])
+        max = np.max([max, acc.max(), qso_f1.max()]) if with_accuracy else np.max([max, qso_f1.max()])
+
+        model_label = ' '.join(y_pred_column.split(' ')[1:])
+        if with_accuracy:
+            plt.plot(mid_points, acc, label='3-class accuracy {}'.format(model_label), alpha=0.9)
+        plt.plot(mid_points, qso_f1, label='QSO F1 {}'.format(model_label), alpha=0.9)
+
+    n_qso = n_qso[mask]
+    # Transfer n_obj into zero one
+    n_qso = (n_qso - n_qso.min()) / n_qso.max()
+    # Transfer n_obj into range of scores
+    n_qso = (n_qso * (max - min)) + min
+    # Plot a grey line with number of objects kind of in the background
+    plt.plot(mid_points, n_qso, '--', label='QSO distribution', color='grey', alpha=0.5)
+
+    plt.xlabel(pretty_print(x))
+    if x == 'n_obs':
+        plt.xscale('log')
+    plt.legend()
+    plt.show()
 
 def get_clf_label(row, y_pred_column=None):
     y_pred_column = y_pred_column if y_pred_column else 'y_pred'
@@ -178,8 +195,8 @@ def plot_confusion_matrix(y_test, y_pred, labels):
     plt.show()
 
 
-def plot_feature_ranking(model, features, n_features=15, n_top_offsets=1, title=None):
-    importances = model.feature_importances_ * 100
+def plot_feature_ranking(features, importances, n_features=15, n_top_offsets=1, title=None):
+    importances = np.array(importances) * 100
 
     indices = np.argsort(importances)[::-1]
     if len(features) > n_features:

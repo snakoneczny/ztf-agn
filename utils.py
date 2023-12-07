@@ -91,7 +91,6 @@ def get_data_stats(data):
         print('{}: {} ({:.1f}%)'.format(min_obs, cut_obs, cut_obs / size * 100))
 
     # Magnitude
-
     # color_palette = get_cubehelix_palette(len(columns))
     # plt.figure()
     # for i, column in enumerate(columns):

@@ -1,10 +1,7 @@
-import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import dates as mdates
 import seaborn as sns
 from astropy import time
-
-from features import FEATURE_SETS
 
 FILTER_COLORS = {'g': 'C2', 'r': 'C3', 'i': 'C4'}
 

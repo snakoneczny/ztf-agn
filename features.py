@@ -9,7 +9,7 @@ from ASTROMER.models import SingleBandEncoder
 
 from env_config import PROJECT_PATH
 
-FEATURE_SETS = {
+FEATURES_DICT = {
     'ZTF': [
         'ad', 'ccd', 'chi2red', 'dec',
         'f1_BIC', 'f1_a', 'f1_amp', 'f1_b', 'f1_phi0', 'f1_power',
@@ -33,7 +33,7 @@ FEATURE_SETS = {
     'astromer_top_clf': pd.read_csv(
         os.path.join(PROJECT_PATH, 'outputs/feature_importance/astromer_retrained-encoder_RF.csv')).loc[:256,
                 'feature'].values,
-    'astrm_clf': ['astrm_galaxy', 'astrm_qso', 'astrm_star'],
+    'AstrmClf': ['astrm_galaxy', 'astrm_qso', 'astrm_star'],
     'WISE': [
         'AllWISE__w1mpro', 'AllWISE__w2mpro', 'AllWISE__w3mpro', 'AllWISE__w4mpro',
         # 'AllWISE__ph_qual',
@@ -123,10 +123,10 @@ def get_astromer_features(ztf_data, retrained=None):
 
 
 def add_colors(data):
-    new_feature_sets = copy.deepcopy(FEATURE_SETS)
+    new_feature_sets = copy.deepcopy(FEATURES_DICT)
     for set_name in ['PS', 'WISE']:
         new_feature_names = []
-        cols = FEATURE_SETS[set_name]
+        cols = FEATURES_DICT[set_name]
         for i in range(len(cols)):
             for j in range(i + 1, len(cols)):
                 feature_name = '{}__{}-{}'.format(cols[i].split('__')[0], cols[i].split('__')[1],

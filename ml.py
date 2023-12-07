@@ -9,23 +9,29 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
 
 from env_config import PROJECT_PATH
-from features import FEATURE_SETS
+from features import FEATURES_DICT
 
 
-def run_experiments(data_labels, master_df, sdss_df, feature_sets):
-    reduced_data_labels = [label for label in data_labels if label != 'astrm_clf']
+def run_experiments(feature_labels, master_df, sdss_df, features_dict, filter=None):
+    data_labels = [label for label in feature_labels if label != 'AstrmClf']
+    if data_labels[0] != 'ZTF':
+        data_labels.insert(0, 'ZTF')
+
     # Define experiments, single for each survey, and one concatenating all features
-    to_process = [[data_label] for data_label in data_labels]
+    to_process = [[feature_label] for feature_label in feature_labels]
 
-    # TODO: delete
-    to_process.append(['astrm_clf', 'PS'])
-    to_process.append(['ZTF', 'astrm_clf'])
+    # Add pairs
+    if len(feature_labels) > 1:
+        for i in range(len(feature_labels) - 1):
+            for j in range(i + 1, len(feature_labels)):
+                to_process.append([feature_labels[i], feature_labels[j]])
 
-    if len(data_labels) > 1:
-        to_process.append(data_labels)
+    # Add all
+    if len(feature_labels) > 2:
+        to_process.append(feature_labels)
 
     # Take all features together to make a subset
-    max_features = np.concatenate([FEATURE_SETS[label] for label in reduced_data_labels])
+    max_features = np.concatenate([FEATURES_DICT[label] for label in data_labels])
 
     # Generate indices of common rows for all experiments
     reduced_df = master_df.dropna(subset=max_features)
@@ -41,32 +47,34 @@ def run_experiments(data_labels, master_df, sdss_df, feature_sets):
     )
     y_train = sdss_train['CLASS']
     y_test = sdss_test['CLASS']
-    
+
     # TODO: use train/test split indices to add those features to the main dataframe, somewhere earlier, in a function
     # Add astromer classification features to the train and test data frames
-    for df_label, df_exp in [('train', df_train), ('val', df_test)]:
-        data_label = '_'.join(reduced_data_labels)
-        file_name = 'outputs/preds/g-band__{}__astromer_FC-1024-512-256__non-shuffle__{}.csv'.format(data_label, df_label)
-        file_path = os.path.join(PROJECT_PATH, file_name)
-        if os.path.exists(file_path):
-            df_preds = pd.read_csv(file_path)
-            df_exp['astrm_galaxy'] = df_preds['GALAXY'].to_list()
-            df_exp['astrm_qso'] = df_preds['QSO'].to_list()
-            df_exp['astrm_star'] = df_preds['STAR'].to_list()
+    if 'AstrmClf' in feature_labels:
+        for df_label, df_exp in [('train', df_train), ('val', df_test)]:
+            data_label = '_'.join(data_labels)
+            file_name = 'outputs/preds/{}-band__{}__astromer_FC-1024-512-256__{}.csv'.format(filter, data_label, df_label)
+            file_path = os.path.join(PROJECT_PATH, file_name)
+            if os.path.exists(file_path):
+                df_preds = pd.read_csv(file_path)
+                df_exp['astrm_galaxy'] = df_preds['GALAXY'].to_list()
+                df_exp['astrm_qso'] = df_preds['QSO'].to_list()
+                df_exp['astrm_star'] = df_preds['STAR'].to_list()
 
     # Add things which are common to all feature set experiments
     results = pd.DataFrame()
     results['y_true'] = y_test.to_numpy()
     results['redshift'] = sdss_test['Z'].to_numpy()
     results['mag_median'] = df_test['median'].to_numpy()
+    results['n_obs'] = df_test['n_obs'].to_numpy()
 
     # Placeholder for classifiers
     classifiers = {}
 
     # Iterate over feature sets
-    for feature_names in tqdm(to_process):
+    for feature_sets in tqdm(to_process):
         # Extract features
-        features = np.concatenate([feature_sets[feature_name] for feature_name in feature_names])
+        features = np.concatenate([features_dict[feature_set] for feature_set in feature_sets])
         X_train = df_train[features]
         X_test = df_test[features]
 
@@ -78,7 +86,7 @@ def run_experiments(data_labels, master_df, sdss_df, feature_sets):
         y_pred = clf.predict(X_test)
 
         # Save results
-        features_label = ' + '.join(feature_names)
+        features_label = ' + '.join(feature_sets)
         results['y_pred {}'.format(features_label)] = y_pred
         classifiers[features_label] = clf
 
