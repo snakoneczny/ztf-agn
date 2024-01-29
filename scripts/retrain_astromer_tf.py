@@ -2,6 +2,7 @@ import sys
 import os
 import pickle
 import argparse
+import random
 
 import numpy as np
 import pandas as pd
@@ -10,24 +11,22 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from ASTROMER.models import SingleBandEncoder
 from ASTROMER.preprocessing import make_pretraining
-import tensorflow as tf
-from tensorflow.keras.layers import Dense, LayerNormalization, LSTM, Conv1D, MaxPooling1D, Flatten
-from tensorflow.keras import Input, Model
 from tensorflow.keras.callbacks import EarlyStopping, TensorBoard
-from tensorflow.keras.losses import CategoricalCrossentropy
-from tensorflow.keras.optimizers import Adam
 
 sys.path.append('..')
 from env_config import DATA_PATH, PROJECT_PATH
-from features import FEATURES_DICT, add_colors
-from astromer_preprocessing import load_numpy
+from features import FEATURES_DICT
+from astromer_models import build_model
+
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-f', '--filter', dest='filter', help='ZTF filter, either g or r', required=True)
-parser.add_argument('-p', '--ps', dest='is_ps', help='Flag wether use cross-match with PS', action='store_true')
-parser.add_argument('-w', '--wise', dest='is_wise', help='Flag wether use cross-match with WISE', action='store_true')
-parser.add_argument('-g', '--gaia', dest='is_gaia', help='Flag wether use cross-match with GAIA', action='store_true')
+parser.add_argument('-f', '--filter', dest='filter', required=True, help='ZTF filter, either g or r')
+parser.add_argument('-p', '--ps', dest='is_ps', action='store_true', help='Flag wether use cross-match with PS')
+parser.add_argument('-w', '--wise', dest='is_wise', action='store_true', help='Flag wether use cross-match with WISE')
+parser.add_argument('-g', '--gaia', dest='is_gaia', action='store_true', help='Flag wether use cross-match with GAIA')
 parser.add_argument('-t', '--tag', dest='tag', help='tag, added as a suffix to the experiment name')
+parser.add_argument('--timespan', dest='timespan', type=int, help='timespan, used for sampling tests')
+parser.add_argument('--frac_n_obs', dest='frac_n_obs', type=float, help='fraction of median number of observations')
 parser.add_argument('--test', dest='is_test', help='Flag on test running', action='store_true')
 args = parser.parse_args()
 
@@ -51,7 +50,7 @@ feature_label = 'ftrs_' + '_'.join(feature_labels)
 
 batch_size = 32
 epochs = 1000 if not is_test else 8
-early_stopping = 20
+early_stopping = 5 if args.filter == 'g' else 10
 model_type = 'FC'
 
 experiment_name = '{}-band__{}__astromer_FC-1024-512-256'.format(filter, data_label)
@@ -62,125 +61,6 @@ if len(feature_labels) > 0:
     experiment_name += '__{}'.format(feature_label)
 if args.tag:
     experiment_name += '__{}'.format(args.tag)
-
-
-def get_convo_layers(placeholder, encoder=None, n_classes=3, maxlen=200):
-    # Without astromer
-    # x = tf.concat([placeholder['times'], placeholder['input']], 2)
-
-    # With astromer
-    # x = encoder(placeholder)
-    # x = tf.reshape(x, [-1, maxlen, encoder.output.shape[-1]])
-    # x = LayerNormalization()(x)
-
-    x = Conv1D(16, 3, activation='relu')(placeholder['input'])
-    x = MaxPooling1D(2)(x)
-    x = LayerNormalization()(x)
-
-    x = Conv1D(32, 3, activation='relu')(x)
-    x = MaxPooling1D(2)(x)
-    x = LayerNormalization()(x)
-
-    x = Conv1D(64, 3, activation='relu')(x)
-    x = MaxPooling1D(2)(x)
-    x = LayerNormalization()(x)
-
-    x = Conv1D(64, 3, activation='relu')(x)
-    x = MaxPooling1D(2)(x)
-    x = LayerNormalization()(x)
-
-    x = Flatten()(x)
-
-    x = Dense(1024, activation='relu')(x)
-    x = Dense(512, activation='relu')(x)
-    x = Dense(256, activation='relu')(x)
-    x = LayerNormalization()(x)
-
-    x = Dense(n_classes, name='output')(x)
-
-    return x
-
-
-def get_lstm_layers(placeholder, encoder=None, n_classes=3, maxlen=200):
-    mask = tf.logical_not(tf.cast(placeholder['mask_in'], tf.bool))
-    mask = tf.squeeze(mask, axis=-1)
-
-    # Without astromer
-    x = tf.concat([placeholder['times'], placeholder['input']], 2)
-
-    # With astromer
-    # x = encoder(placeholder)
-    # x = tf.reshape(x, [-1, maxlen, encoder.output.shape[-1]])
-    # x = LayerNormalization()(x)
-
-    dropout = 0.3
-    x = LSTM(256, return_sequences=True, dropout=dropout, name='LSTM_0')(x, mask=mask)
-    x = LayerNormalization()(x)
-    x = LSTM(256, return_sequences=False, dropout=dropout, name='LSTM_1')(x, mask=mask)
-    x = LayerNormalization()(x)
-
-    # x = Dense(1024, activation='relu')(x)
-    # x = Dense(512, activation='relu')(x)
-    # x = Dense(256, activation='relu')(x)
-    # x = LayerNormalization()(x)
-
-    x = Dense(n_classes, name='output')(x)
-
-    return x
-
-
-def get_fc_layers(placeholder, encoder=None, n_classes=3):
-    mask = 1. - placeholder['mask_in']
-    x = encoder(placeholder, training=False)  # training flag here controls the dropout
-    x = x * mask
-
-    x = tf.reduce_sum(x, 1) / tf.reduce_sum(mask, 1)
-    # x = tf.concat([
-    #         tf.reduce_sum(x, 1) / tf.reduce_sum(mask, 1),
-    #         tf.reduce_max(x, 1),
-    # ], 1)
-
-    # x = tf.concat([x, placeholder['features']], 1)    
-    # x = LayerNormalization()(x)
-
-    x = Dense(1024, activation='relu')(x)
-    # x = LayerNormalization()(x)
-    x = Dense(512, activation='relu')(x)
-    # x = LayerNormalization()(x)
-    x = Dense(256, activation='relu')(x)
-    x = LayerNormalization()(x)
-    
-    x = Dense(n_classes, name='output')(x)
-
-    return x
-
-
-def build_model(model_type, encoder=None, n_classes=3, maxlen=200, n_features=None, train_astromer=True, lr=1e-3):
-    serie = Input(shape=(maxlen, 1), batch_size=None, name='input')
-    times = Input(shape=(maxlen, 1), batch_size=None, name='times')
-    mask = Input(shape=(maxlen, 1), batch_size=None, name='mask')
-    # features = Input(shape=n_features, batch_size=None, name='features')
-
-    placeholder = {'input': serie, 'mask_in': mask, 'times': times}  # , 'features': features}
-
-    encoder.trainable = train_astromer
-
-    if model_type == 'LSTM':
-        x = get_lstm_layers(placeholder, encoder, n_classes, maxlen)
-    elif model_type == 'CNN':
-        x = get_convo_layers(placeholder, encoder, n_classes, maxlen)
-    else:
-        x = get_fc_layers(placeholder, encoder, n_classes)
-
-    classifier = Model(inputs=placeholder, outputs=x, name='FCATT')
-    classifier.compile(
-        loss=CategoricalCrossentropy(from_logits=True),
-        metrics=['accuracy'],
-        optimizer=Adam(lr)
-    )
-
-    return classifier
-
 
 # Read ZTF x SDSS lightcurves with available features
 file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter)
@@ -206,10 +86,53 @@ ztf_x_sdss_features = ztf_x_sdss_features.reset_index(drop=True)
 ztf_x_sdss_reduced = np.array(ztf_x_sdss_reduced)[indices.tolist()]
 sdss_x_ztf_features = sdss_x_ztf_features.loc[indices].reset_index(drop=True)
 
-# Change shape to feed a neural network
+# Get limited subset if testing
 to_process = ztf_x_sdss_reduced[:1000] if is_test else ztf_x_sdss_reduced
+
+# Get sampling test
+if args.timespan:    
+
+    # Subset of minimal timespan
+    minimal_timespan = 1000
+    idx_timespan = [i for i in range(len(to_process)) if to_process[i]['mjd'][-1] - to_process[i]['mjd'][0] >= minimal_timespan]
+    to_process = to_process[idx_timespan]
+    sdss_x_ztf_features = sdss_x_ztf_features.loc[idx_timespan].reset_index(drop=True)
+
+    # Truncate lightcurves to the exact timespan
+    for i in range(len(to_process)):
+        mjds = to_process[i]['mjd']
+        idx_start = 0
+        while (mjds[-1] - mjds[idx_start]) > args.timespan:
+            idx_start += 1
+        for dict_key in ['mjd', 'mag', 'magerr']:
+            to_process[i][dict_key] = to_process[i][dict_key][idx_start:]
+
+    # Find median number of observations
+    n_obs_arr = [len(lc_dict['mjd']) for lc_dict in to_process]
+    n_obs_median = np.median(n_obs_arr)
+
+    # Subsample minimal number of observations
+    idx_median = [i for i in range(len(to_process)) if len(to_process[i]['mjd']) >= n_obs_median]
+    to_process = to_process[idx_median]
+    sdss_x_ztf_features = sdss_x_ztf_features.loc[idx_median].reset_index(drop=True)
+
+    # Sample a fraction of observations
+    n_obs_goal = int(args.frac_n_obs * n_obs_median)
+    random.seed(7235)
+    for i in range(len(to_process)):
+        idx_goal = sorted(random.sample(range(len(to_process[i]['mjd'])), n_obs_goal))
+        for dict_key in ['mjd', 'mag', 'magerr']:
+            to_process[i][dict_key] = to_process[i][dict_key][idx_goal]
+        
+    # Add a tag to the experiment name
+    experiment_name += '__timespan={}_p-nobs={}_nobs={}'.format(
+        args.timespan, int(args.frac_n_obs * 100), n_obs_goal)
+
+# Change shape to feed a neural network and sample random 200 observations
+random.seed(1257)
 X = [np.array([np.array([lc_dict['mjd'][i], lc_dict['mag'][i], lc_dict['magerr'][i]], dtype='object') for i in
-               range(len(lc_dict['mjd']))], dtype='object') for lc_dict in tqdm(to_process)]
+               (range(len(lc_dict['mjd'])) if len(lc_dict['mjd']) <= 200 else sorted(random.sample(range(len(lc_dict['mjd'])), 200)))],
+              dtype='object') for lc_dict in tqdm(to_process)]
 
 # ztf_x_sdss_features, feature_sets = add_colors(ztf_x_sdss_features)
 # X_features = ztf_x_sdss_features[np.concatenate([feature_sets[label] for label in feature_labels])]

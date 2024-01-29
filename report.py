@@ -9,66 +9,88 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classifica
 from utils import pretty_print
 
 
-def print_summary_table(results, data_label=None):
-    if isinstance(results, pd.DataFrame):
-        df = get_summary_table(results, data_label)
-    else:
-        df = stack_summary_tables(
-            [get_summary_table(results_df, data_label) for data_label, results_df in tqdm(results.items())])
+def print_summary_table(results_dict, filters=None, concise=False):
+    filters = ['g', 'r'] if not filters else filters
+
+    df = stack_summary_tables([get_summary_table(results_dict, data_label, filters, concise) for data_label in tqdm(results_dict[filters[0]].keys())], filters)
+
+    if concise:
+        new_column_order = ['data', 'features']
+        for filter in filters:
+            new_column_order.extend([
+                'QSO support (%) {}-band'.format(filter),
+                'QSO f1 {}-band'.format(filter),
+                'QSO f1 global {}-band'.format(filter),
+                'accuracy {}-band'.format(filter),
+            ])
+        df = df[new_column_order]
 
     pd.options.display.float_format = '{:.2f}'.format
     display(df)
     print(df.to_latex(escape=False, na_rep='', float_format='%.2f', index=False))
 
 
-def stack_summary_tables(tables):
-    n_qso = tables[0].loc[0, 'QSO support']
-    n_obj = tables[0].loc[0, 'support']
-    qso_supp_id = tables[0].columns.get_loc('QSO support')
-    supp_id = tables[0].columns.get_loc('support')
-    for table in tables:
-        table.insert(qso_supp_id + 1, 'QSO support (%)', table['QSO support'] / n_qso * 100)
-        table.insert(qso_supp_id + 2, 'QSO recall global', table['QSO recall'] * table['QSO support (%)'] / 100)
+def stack_summary_tables(tables, filters):
+    for filter in filters:
+        n_qso = tables[0].loc[0, 'QSO support {}-band'.format(filter)]
+        n_obj = tables[0].loc[0, 'support {}-band'.format(filter)]
+        qso_supp_id = tables[0].columns.get_loc('QSO support {}-band'.format(filter))
+        supp_id = tables[0].columns.get_loc('support {}-band'.format(filter))
+        for table in tables:
+            table.insert(qso_supp_id + 1, 'QSO support (%) {}-band'.format(filter), table['QSO support {}-band'.format(filter)] / n_qso)
+            table.insert(qso_supp_id + 2, 'QSO recall global {}-band'.format(filter), table['QSO recall {}-band'.format(filter)] * table['QSO support (%) {}-band'.format(filter)])
 
-        prec = table['QSO precision']
-        rec = table['QSO recall global']
-        table.insert(qso_supp_id + 3, 'QSO f1 global', 2 * (prec * rec) / (prec + rec))
+            prec = table['QSO precision {}-band'.format(filter)]
+            rec = table['QSO recall global {}-band'.format(filter)]
+            table.insert(qso_supp_id + 3, 'QSO f1 global {}-band'.format(filter), 2 * (prec * rec) / (prec + rec))
 
-        table.insert(supp_id + 4, 'support (%)', table['support'] / n_obj * 100)
+            table.insert(supp_id + 4, 'support (%) {}-band'.format(filter), table['support {}-band'.format(filter)] / n_obj * 100)
 
     return pd.concat(tables, ignore_index=True)
 
 
-def get_summary_table(results_df, data_label=None):
-    df = pd.DataFrame()
-    features_labels = get_feature_labels(results_df.columns)
-    for i, features_label in enumerate(features_labels):
-        y_pred = results_df['y_pred {}'.format(features_label)]
-        y_true = results_df['y_true']
-        report = classification_report(y_true, y_pred, digits=4, output_dict=True)
+def get_summary_table(results_dict, data_label, filters, concise=False):
+    summary_df = pd.DataFrame()
+    feature_labels = get_feature_labels(results_dict[filters[0]][data_label].columns)
 
+    if concise:
+        n_surveys = len(data_label.split('_'))
+        feature_labels = [label for label in feature_labels if len(label.split(' + ')) == 1 or len(label.split(' + ')) == n_surveys + 1]  # +1 because AstrmClf
+
+    for i, feature_label in enumerate(feature_labels):
         new_row = {
             'data': data_label,
-            'features': features_label,
-            'QSO precision': report['QSO']['precision'],
-            'QSO recall': report['QSO']['recall'],
-            'QSO f1': report['QSO']['f1-score'],
-            'QSO support': report['QSO']['support'],
-            'accuracy': report['accuracy'],
-            'support': report['macro avg']['support'],
+            'features': feature_label,
         }
+
+        for filter in filters:
+            results_df = results_dict[filter][data_label]
+
+            y_pred = results_df['y_pred {}'.format(feature_label)]
+            y_true = results_df['y_true']
+            report = classification_report(y_true, y_pred, digits=4, output_dict=True)
+
+            new_row.update({
+                'QSO precision {}-band'.format(filter): report['QSO']['precision'],
+                'QSO recall {}-band'.format(filter): report['QSO']['recall'],
+                'QSO f1 {}-band'.format(filter): report['QSO']['f1-score'],
+                'QSO support {}-band'.format(filter): report['QSO']['support'],
+                'accuracy {}-band'.format(filter): report['accuracy'],
+                'support {}-band'.format(filter): report['macro avg']['support'],
+            })
+
         for column, value in new_row.items():
-            df.loc[i, column] = value
+            summary_df.loc[i, column] = value
 
-    return df
+    return summary_df
 
 
-def make_reports(results_df_dict, feature_importance_dict, filter, data_label):
+def make_reports(results_df_dict, feature_importance_dict, filter, data_label, feature_labels=None):
     results_df = results_df_dict[filter][data_label]
     feature_importance_dict = feature_importance_dict[filter][data_label]
 
-    features_labels = get_feature_labels(results_df.columns)
-    for features_label in features_labels:
+    feature_labels = get_feature_labels(results_df.columns) if not feature_labels else feature_labels
+    for features_label in feature_labels:
         print('features: {}'.format(features_label))
 
         # Make single report
@@ -85,7 +107,7 @@ def get_feature_labels(columns):
 
 def make_report(results_df, feature_importances=None, label=None):
     y_pred_column = 'y_pred {}'.format(label) if label else 'y_pred'
-    feature_importances = feature_importances[label] if label else feature_importances
+    feature_importances = feature_importances[label] if label and feature_importances else feature_importances
 
     # Classification metrics and confusion matrix
     y_test = results_df['y_true']
@@ -94,8 +116,16 @@ def make_report(results_df, feature_importances=None, label=None):
     plot_confusion_matrix(y_test, y_pred, ['GALAXY', 'QSO', 'STAR'])
 
     # Plot results as functions of magnitude, redshift and number of observations
-    # for x in ['n_obs', 'mag_median', 'redshift']:
-    #     plot_results_as_function(results_df, x='n_obs', labels=[y_pred_column], with_accuracy=True)
+    x_to_run = [
+        'mag_median', 'redshift',
+        'n_obs', 'n_obs_200',
+        'timespan', 'timespan_200',
+        'cadence_mean', 'cadence_mean_200',
+        'cadence_median', 'cadence_median_200',
+        'cadence_std', 'cadence_std_200'
+    ]
+    for x in x_to_run:
+        plot_results_as_function(results_df, x=x, labels=[y_pred_column], with_accuracy=True)
 
     # Plot histograms of T/F P/N as functions of magnitude, redshift and number of observations
     # results_df['classification outcome'] = results_df.apply(get_clf_label, args=(y_pred_column,), axis=1)
@@ -131,7 +161,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     # Make bins and get number of quasars in bins
     min, max = results_df[x].min(), results_df[x].max()
     n_bins = 20
-    bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x == 'n_obs' else np.linspace(min, max, n_bins)
+    bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x in ['n_obs', 'n_obs_200'] else np.linspace(min, max, n_bins)
     mid_points = np.array([(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)])
     results_df['bin'] = pd.cut(results_df[x], bins, include_lowest=True)
     groups = results_df.groupby('bin')
@@ -168,7 +198,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     plt.plot(mid_points, n_qso, '--', label='QSO distribution', color='grey', alpha=0.5)
 
     plt.xlabel(pretty_print(x))
-    if x == 'n_obs':
+    if x in ['n_obs', 'n_obs_200']:
         plt.xscale('log')
     plt.legend()
     plt.show()

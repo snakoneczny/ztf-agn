@@ -1,6 +1,8 @@
 import sys
 import os
 import pickle
+import argparse
+import random
 
 import numpy as np
 from tqdm import tqdm
@@ -11,7 +13,12 @@ from ASTROMER.preprocessing import load_numpy
 sys.path.append('..')
 from env_config import DATA_PATH, PROJECT_PATH
 
-filter = 'r'
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-f', '--filter', dest='filter', help='ZTF filter, either g or r', required=True)
+args = parser.parse_args()
+filter = args.filter
+
 output_weight_path = 'outputs/models/astromer_{}'.format(filter)
 
 batch_size = 32
@@ -33,9 +40,10 @@ with open(os.path.join(DATA_PATH, fp), 'rb') as file:
 # ztf_x_sdss_reduced = np.array(ztf_x_sdss_reduced)[indices.tolist()]
 
 # Change shape to feed a neural network
+random.seed(1257)
 X = [np.array([np.array([lc_dict['mjd'][i], lc_dict['mag'][i], lc_dict['magerr'][i]], dtype='object') for i in
-               range(len(lc_dict['mjd']))], dtype='object') for lc_dict in
-     tqdm(ztf_x_sdss_reduced, desc='Input matrix')]
+               (range(len(lc_dict['mjd'])) if len(lc_dict['mjd']) <= 200 else sorted(random.sample(range(len(lc_dict['mjd'])), 200)))],
+              dtype='object') for lc_dict in tqdm(ztf_x_sdss_reduced, desc='Input matrix')]
 
 class_dict = {
     'GALAXY': 0,

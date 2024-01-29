@@ -1,6 +1,7 @@
 .idea/
 outputs/
 scripts/weights/
+._*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

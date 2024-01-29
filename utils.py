@@ -19,13 +19,16 @@ class struct(object):
 
 def pretty_print(x):
     pretty_dict = {
-        'n_obs': 'number of observations',
+        'n_obs': 'number of observation epochs',
+        'n_obs_200': 'number of observation epochs (200)',
         'mag_median': 'median magnitude',
+        'mean_cadence': 'mean cadence',
     }
     if x in pretty_dict:
-        return pretty_dict[x]
-    else:
-        return x
+        x = pretty_dict[x]    
+    if 'cadence' in x or 'timespan' in x:
+        x = ' '.join(x.split('_')) + ' [days]'
+    return x
 
 
 def average_nights(lc_dict):
@@ -75,12 +78,12 @@ def get_data_stats(data):
 
     plt.figure()
     sns.histplot(n_obs)
-    plt.xlabel('number of observations')
+    plt.xlabel('number of observation epochs')
     plt.title(title)
 
     plt.figure()
     sns.ecdfplot(n_obs)
-    plt.xlabel('number of observations')
+    plt.xlabel('number of observation epochs')
     plt.title(title)
     plt.show()
 

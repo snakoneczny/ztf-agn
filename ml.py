@@ -66,7 +66,14 @@ def run_experiments(feature_labels, master_df, sdss_df, features_dict, filter=No
     results['y_true'] = y_test.to_numpy()
     results['redshift'] = sdss_test['Z'].to_numpy()
     results['mag_median'] = df_test['median'].to_numpy()
-    results['n_obs'] = df_test['n_obs'].to_numpy()
+    for col in ([
+        'n_obs', 'n_obs_200',
+        'timespan', 'timespan_200',
+        'cadence_mean', 'cadence_mean_200',
+        'cadence_median', 'cadence_median_200',
+        'cadence_std', 'cadence_std_200'
+    ]):
+        results[col] = df_test[col].to_numpy()
 
     # Placeholder for classifiers
     classifiers = {}
