@@ -57,27 +57,19 @@ FEATURES_DICT = {
 }
 
 
-def get_features(data, with_variability=False):
-    features = defaultdict(list)
-    percentiles = [0, 2, 16, 50, 84, 98, 100] if with_variability else [50]
-
-    for i in tqdm(range(data.shape[0])):
-        for mag in ['g', 'r', 'i']:
-
-            # Percentiles
-            for p in percentiles:
-                features['percentile_{}_{}'.format(p, mag)].append(np.percentile(data[i]['mag_{}'.format(mag)][0], p))
-
-        # Colors for each percentile
-        colors = [('g', 'r'), ('r', 'i'), ('g', 'i')]
-        for mag_a, mag_b in colors:
-            for p in percentiles:
-                m_a = features['percentile_{}_{}'.format(p, mag_a)][i]
-                m_b = features['percentile_{}_{}'.format(p, mag_b)][i]
-                features['color_{}_{}-{}'.format(p, mag_a, mag_b)].append(m_a - m_b)
-                features['ratio_{}_{}/{}'.format(p, mag_a, mag_b)].append(m_a / m_b)
-
-    return pd.DataFrame(features)
+def add_colors(data):
+    new_feature_sets = copy.deepcopy(FEATURES_DICT)
+    for set_name in ['PS', 'WISE']:
+        new_feature_names = []
+        cols = FEATURES_DICT[set_name]
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                feature_name = '{}__{}-{}'.format(cols[i].split('__')[0], cols[i].split('__')[1],
+                                                  cols[j].split('__')[1])
+                data.loc[:, feature_name] = data.loc[:, cols[i]] - data.loc[:, cols[j]]
+                new_feature_names.append(feature_name)
+        new_feature_sets[set_name].extend(new_feature_names)
+    return data, new_feature_sets
 
 
 def get_astromer_features(ztf_data, retrained=None):
@@ -114,24 +106,5 @@ def get_astromer_features(ztf_data, retrained=None):
             f[i] = np.concatenate((f[i], np.mean(tmp[i], axis=0), np.sum(tmp[i], axis=0)))
 
         features.extend(f)
-        # for j in range(len(tmp)):
-        # Dimensions: light curves, observations in a light curve, number of attention layers
-        # attention_vectors[i+j, :tmp[j].shape[0], :] = tmp[j]
-        # i += len(tmp)
 
     return features
-
-
-def add_colors(data):
-    new_feature_sets = copy.deepcopy(FEATURES_DICT)
-    for set_name in ['PS', 'WISE']:
-        new_feature_names = []
-        cols = FEATURES_DICT[set_name]
-        for i in range(len(cols)):
-            for j in range(i + 1, len(cols)):
-                feature_name = '{}__{}-{}'.format(cols[i].split('__')[0], cols[i].split('__')[1],
-                                                  cols[j].split('__')[1])
-                data.loc[:, feature_name] = data.loc[:, cols[i]] - data.loc[:, cols[j]]
-                new_feature_names.append(feature_name)
-        new_feature_sets[set_name].extend(new_feature_names)
-    return data, new_feature_sets

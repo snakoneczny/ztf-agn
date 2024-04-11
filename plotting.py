@@ -36,17 +36,18 @@ def plot_embedding(data, feature_labels):
         plt.title(cls)
 
 
-def plot_light_curve(lc_dict):
+def plot_light_curve(lc_dict, ax=None):
+    if ax is None:
+        _, ax = plt.subplots()
+
     dates = time.Time(lc_dict['mjd'], format='mjd').datetime
     filter = lc_dict['filter']
 
-    fig, ax = plt.subplots()
     ax.errorbar(dates, lc_dict['mag'], yerr=lc_dict['magerr'], fmt='o',
                 markersize=0.7)  # , color=FILTER_COLORS[filter])
 
     ax.invert_yaxis()
     ax.set_ylabel('magnitude {}'.format(filter))
-    ax.set_xlabel('date')
     locator = mdates.AutoDateLocator()
     formatter = mdates.ConciseDateFormatter(locator)
     ax.xaxis.set_major_locator(locator)

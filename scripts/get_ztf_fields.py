@@ -2,37 +2,42 @@ import sys
 import os
 import pickle
 
+import numpy as np
 from penquins import Kowalski
+from tqdm import tqdm
 
 sys.path.append('..')
 from env_config import DATA_PATH
-from data import ZTF_FILTER_NAMES
-from ztf import get_ztf_kowalski_fields
+from ztf import ZTF_FILTER_NAMES, get_ztf_light_curves
 
 
-field_ids = [296, 297, 423, 424, 487, 488, 562, 563, 682, 683, 699, 700, 717, 718, 777, 778, 841, 842, 852, 853]
+fields = [296, 297, 423, 424, 487, 488, 562, 563, 682, 683, 699, 700, 717, 718, 777, 778, 841, 842, 852, 853]
 
-to_process = [
-    (1, 10000),
-    (2, 10000),
-    # (3, 1000),
-]
-
-kowalski = Kowalski(
-    username='nakonecz',
-    password='%p!Sn8YVP12h',
-    host='gloria.caltech.edu',
-    timeout=99999999,
-)
-
-token = kowalski.authenticate()
-
-for filter, limit_per_field in to_process:
+for filter in [1, 2]:
     filter_name = ZTF_FILTER_NAMES[filter]
-    print('Processing filter: {}'.format(filter_name))
 
-    data = get_ztf_kowalski_fields(field_ids, token, filter=filter, limit_per_field=limit_per_field)
+    for field in tqdm(fields):
+        output_file_name = 'ZTF/ZTF_20240117/fields/ZTF_20240117__field_{}__{}-band'.format(field, filter_name)
+        output_file_name = os.path.join(DATA_PATH, output_file_name)
+        
+        if not os.path.exists(output_file_name):
+            print('Processing filter: {}, field: {}'.format(filter_name, field))
 
-    file_name = os.path.join(DATA_PATH, 'ZTF/ZTF_20210401__fields_Roestel_2M_{}'.format(filter_name))
-    with open(file_name, 'wb') as file:
-        pickle.dump(data, file)
+            kowalski = Kowalski(
+                username='nakonecz',
+                password='%p!Sn8YVP12h',
+                host='melman.caltech.edu',
+                timeout=99999999,
+            )
+
+            # Read the IDs
+            file_name = 'ZTF/ZTF_20240117/field_IDs/ZTF_20240117__field_{}__{}-band__IDs.npy'.format(field, filter_name)
+            file_name = os.path.join(DATA_PATH, file_name)
+            with open(file_name, 'rb') as file:
+                ids = np.load(file)
+
+            data = get_ztf_light_curves(ids, kowalski)
+
+            with open(output_file_name, 'wb') as file:
+                pickle.dump(data, file)
+            print('Original IDs: {}, light curves: {}, saved to: {}'.format(len(ids), len(data), output_file_name))

@@ -19,27 +19,33 @@ parser.add_argument('-f', '--filter', dest='filter', help='ZTF filter, either g 
 args = parser.parse_args()
 filter = args.filter
 
-output_weight_path = 'outputs/models/astromer_{}'.format(filter)
-
+# Training params
+ztf_date = '20210401'  # '20210401', '20230821'
 batch_size = 32
 
+# Paths
+if ztf_date == '20210401':
+    paths = {
+        'ztf_x_sdss': 'ZTF_x_SDSS/ZTF_20210401/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter),
+        'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_20210401/specObj-dr18_x_ztf_20210401__singles_filter_{}__features'.format(filter),
+    }
+else:
+    paths = {
+        'ztf_x_sdss': 'ZTF_x_SDSS/ZTF_{}/ztf_{}_x_specObj-dr18__singles__filter_{}__reduced'.format(ztf_date, ztf_date, filter),
+        'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_{}/specObj-dr18_x_ztf_{}__singles__filter_{}__reduced'.format(ztf_date, ztf_date, filter),
+    }
+output_weight_path = 'outputs/models/astromer__ztf_{}__band_{}'.format(ztf_date, filter)
+
+
 # Read ZTF x SDSS lightcurves subset with available features
-file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter)
-with open(os.path.join(DATA_PATH, file_path), 'rb') as file:
+with open(os.path.join(DATA_PATH, paths['ztf_x_sdss']), 'rb') as file:
     ztf_x_sdss_reduced = pickle.load(file)
 
 # Read SDSS x ZTF subset with available features
-file_path = 'ZTF_x_SDSS/specObj-dr18_x_ztf_20210401__singles_filter_{}__features'
-fp = file_path.format(filter)
-with open(os.path.join(DATA_PATH, fp), 'rb') as file:
+with open(os.path.join(DATA_PATH, paths['sdss_x_ztf']), 'rb') as file:
     sdss_x_ztf_features = pickle.load(file)
 
-# Get only subset of AGNs
-# sdss_x_ztf_features = sdss_x_ztf_features.loc[sdss_x_ztf_features['CLASS'] == 'QSO']
-# indices = sdss_x_ztf_features.index
-# ztf_x_sdss_reduced = np.array(ztf_x_sdss_reduced)[indices.tolist()]
-
-# Change shape to feed a neural network
+# Change shape to feed the neural network
 random.seed(1257)
 X = [np.array([np.array([lc_dict['mjd'][i], lc_dict['mag'][i], lc_dict['magerr'][i]], dtype='object') for i in
                (range(len(lc_dict['mjd'])) if len(lc_dict['mjd']) <= 200 else sorted(random.sample(range(len(lc_dict['mjd'])), 200)))],

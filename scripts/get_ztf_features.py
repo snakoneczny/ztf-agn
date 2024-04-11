@@ -10,8 +10,8 @@ from ztf import get_ztf_features
 
 
 to_process = [
-    'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_g',
-    'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_r',
+    'ZTF_x_SDSS/ZTF_20230821/ztf_20230821_x_specObj-dr18__singles__filter_g__reduced',
+    'ZTF_x_SDSS/ZTF_20230821/ztf_20230821_x_specObj-dr18__singles__filter_r__reduced',
 ]
 
 kowalski = Kowalski(
@@ -37,3 +37,4 @@ for file_path in to_process:
     file_path += '__features'
     with open(file_path, 'wb') as file:
         pickle.dump(features, file)
+    print('Saved to: ' + file_path)

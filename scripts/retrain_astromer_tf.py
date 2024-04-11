@@ -1,22 +1,21 @@
 import sys
 import os
-import pickle
 import argparse
 import random
 
 import numpy as np
 import pandas as pd
 from tqdm.notebook import tqdm
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
 from ASTROMER.models import SingleBandEncoder
 from ASTROMER.preprocessing import make_pretraining
-from tensorflow.keras.callbacks import EarlyStopping, TensorBoard
+from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, ModelCheckpoint
+from sklearn.metrics import accuracy_score, f1_score
 
 sys.path.append('..')
-from env_config import DATA_PATH, PROJECT_PATH
-from features import FEATURES_DICT
-from astromer_models import build_model
+from env_config import PROJECT_PATH
+from ml import get_train_data
+from light_curves import subsample_light_curves
+from astromer import build_model
 
 
 parser = argparse.ArgumentParser()
@@ -24,118 +23,72 @@ parser.add_argument('-f', '--filter', dest='filter', required=True, help='ZTF fi
 parser.add_argument('-p', '--ps', dest='is_ps', action='store_true', help='Flag wether use cross-match with PS')
 parser.add_argument('-w', '--wise', dest='is_wise', action='store_true', help='Flag wether use cross-match with WISE')
 parser.add_argument('-g', '--gaia', dest='is_gaia', action='store_true', help='Flag wether use cross-match with GAIA')
+parser.add_argument('-s', '--save', dest='with_save', action='store_true', help='Save the model')
 parser.add_argument('-t', '--tag', dest='tag', help='tag, added as a suffix to the experiment name')
 parser.add_argument('--timespan', dest='timespan', type=int, help='timespan, used for sampling tests')
 parser.add_argument('--frac_n_obs', dest='frac_n_obs', type=float, help='fraction of median number of observations')
 parser.add_argument('--test', dest='is_test', help='Flag on test running', action='store_true')
 args = parser.parse_args()
 
-# Flag for reduced data processing
-is_test = args.is_test
+# Data
+ztf_date = '20230821'  # '20210401', '20230821'
+
+# Astromer pretraining
+path_astromer = 'outputs/models/astromer__ztf_{}__band_{}'.format(ztf_date, args.filter)
 
 # Training params
-filter = args.filter
+batch_size = 32
+epochs = 1000 if not args.is_test else 3
+early_stopping = 15 if args.filter == 'g' else 20
+minimum_timespan = {
+    '20210401': 1000,
+    '20230821': 1800,
+}
+model_type = 'FC'
+test_size = 10000
 
-data_subsets = ['ZTF']  # ZTF, PS, WISE
+# Create a data subsets label
+data_subsets = ['ZTF']
 if args.is_ps:
     data_subsets.append('PS')
 if args.is_wise:
     data_subsets.append('WISE')
 if args.is_gaia:
     data_subsets.append('GAIA')
-
-feature_labels = []  # ZTF, PS, WISE
 data_label = '_'.join(data_subsets)
-feature_label = 'ftrs_' + '_'.join(feature_labels)
 
-batch_size = 32
-epochs = 1000 if not is_test else 8
-early_stopping = 5 if args.filter == 'g' else 10
-model_type = 'FC'
-
-experiment_name = '{}-band__{}__astromer_FC-1024-512-256'.format(filter, data_label)
-# experiment_name = '{}__LSTM-256-256'.format(data_label)
-# experiment_name = '{}__CNN-16-32-64-64_FC-1024-512-256'.format(data_label)
-
-if len(feature_labels) > 0:
-    experiment_name += '__{}'.format(feature_label)
+# Create an experiment name
+experiment_name = 'ZTF_{}__band_{}__xmatch_{}__astromer_FC-1024-512-256'.format(ztf_date, args.filter, data_label)
 if args.tag:
     experiment_name += '__{}'.format(args.tag)
 
-# Read ZTF x SDSS lightcurves with available features
-file_path = 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter)
-with open(os.path.join(DATA_PATH, file_path), 'rb') as file:
-    ztf_x_sdss_reduced = pickle.load(file)
-
-# Read ZTF x SDSS subset with available features
-with open(os.path.join(DATA_PATH, 'ZTF_x_SDSS/ztf_20210401_x_specObj-dr18__singles_filter_{}__features'.format(filter)),
-          'rb') as file:
-    ztf_x_sdss_features = pickle.load(file)
-
-# Read SDSS x ZTF subset with available features
-file_path = 'ZTF_x_SDSS/specObj-dr18_x_ztf_20210401__singles_filter_{}__features'
-fp = file_path.format(filter)
-with open(os.path.join(DATA_PATH, fp), 'rb') as file:
-    sdss_x_ztf_features = pickle.load(file)
-
-# Take subset with features
-features_list = np.concatenate([FEATURES_DICT[label] for label in data_subsets])
-ztf_x_sdss_features = ztf_x_sdss_features.dropna(subset=features_list)
-indices = ztf_x_sdss_features.index
-ztf_x_sdss_features = ztf_x_sdss_features.reset_index(drop=True)
-ztf_x_sdss_reduced = np.array(ztf_x_sdss_reduced)[indices.tolist()]
-sdss_x_ztf_features = sdss_x_ztf_features.loc[indices].reset_index(drop=True)
+# Read the train data
+return_features = True if ztf_date == '20210401' else False
+if ztf_date == '20210401':
+    ztf_x_sdss_reduced, sdss_x_ztf_features, ztf_x_sdss_features = \
+        get_train_data(ztf_date=ztf_date, filter=args.filter, data_subsets=data_subsets, return_features=True)
+else:
+    ztf_x_sdss_reduced, sdss_x_ztf_features = \
+        get_train_data(ztf_date=ztf_date, filter=args.filter, data_subsets=data_subsets, return_features=False)
 
 # Get limited subset if testing
-to_process = ztf_x_sdss_reduced[:1000] if is_test else ztf_x_sdss_reduced
+to_process = ztf_x_sdss_reduced[:test_size] if args.is_test else ztf_x_sdss_reduced
 
-# Get sampling test
-if args.timespan:    
+# Make sampling experiment
+if args.timespan:
+    to_process, sdss_x_ztf_features, n_obs_subsampled = subsample_light_curves(
+        to_process, sdss_x_ztf_features, minimum_timespan=minimum_timespan[ztf_date],
+        timespan=args.timespan, frac_n_obs=args.frac_n_obs)
 
-    # Subset of minimal timespan
-    minimal_timespan = 1000
-    idx_timespan = [i for i in range(len(to_process)) if to_process[i]['mjd'][-1] - to_process[i]['mjd'][0] >= minimal_timespan]
-    to_process = to_process[idx_timespan]
-    sdss_x_ztf_features = sdss_x_ztf_features.loc[idx_timespan].reset_index(drop=True)
-
-    # Truncate lightcurves to the exact timespan
-    for i in range(len(to_process)):
-        mjds = to_process[i]['mjd']
-        idx_start = 0
-        while (mjds[-1] - mjds[idx_start]) > args.timespan:
-            idx_start += 1
-        for dict_key in ['mjd', 'mag', 'magerr']:
-            to_process[i][dict_key] = to_process[i][dict_key][idx_start:]
-
-    # Find median number of observations
-    n_obs_arr = [len(lc_dict['mjd']) for lc_dict in to_process]
-    n_obs_median = np.median(n_obs_arr)
-
-    # Subsample minimal number of observations
-    idx_median = [i for i in range(len(to_process)) if len(to_process[i]['mjd']) >= n_obs_median]
-    to_process = to_process[idx_median]
-    sdss_x_ztf_features = sdss_x_ztf_features.loc[idx_median].reset_index(drop=True)
-
-    # Sample a fraction of observations
-    n_obs_goal = int(args.frac_n_obs * n_obs_median)
-    random.seed(7235)
-    for i in range(len(to_process)):
-        idx_goal = sorted(random.sample(range(len(to_process[i]['mjd'])), n_obs_goal))
-        for dict_key in ['mjd', 'mag', 'magerr']:
-            to_process[i][dict_key] = to_process[i][dict_key][idx_goal]
-        
     # Add a tag to the experiment name
     experiment_name += '__timespan={}_p-nobs={}_nobs={}'.format(
-        args.timespan, int(args.frac_n_obs * 100), n_obs_goal)
+        args.timespan, int(args.frac_n_obs * 100), n_obs_subsampled)
 
 # Change shape to feed a neural network and sample random 200 observations
 random.seed(1257)
 X = [np.array([np.array([lc_dict['mjd'][i], lc_dict['mag'][i], lc_dict['magerr'][i]], dtype='object') for i in
                (range(len(lc_dict['mjd'])) if len(lc_dict['mjd']) <= 200 else sorted(random.sample(range(len(lc_dict['mjd'])), 200)))],
               dtype='object') for lc_dict in tqdm(to_process)]
-
-# ztf_x_sdss_features, feature_sets = add_colors(ztf_x_sdss_features)
-# X_features = ztf_x_sdss_features[np.concatenate([feature_sets[label] for label in feature_labels])]
 
 class_dict = {
     'GALAXY': 0,
@@ -144,65 +97,82 @@ class_dict = {
 }
 y = sdss_x_ztf_features['CLASS'].apply(lambda x: class_dict[x]).to_list()
 
-if is_test:
-    y = y[:1000]
-    # X_features = X_features[:1000]
+if args.is_test:
+    y = y[:test_size]
+    sdss_x_ztf_features = sdss_x_ztf_features.head(test_size)
 
-# X_train, X_val, X_f_train, X_f_val, y_train, y_val = train_test_split(
-#     X, X_features, y, test_size=0.33, random_state=42
-# )
-X_train, X_val, y_train, y_val = train_test_split(
-    X, y, test_size=0.33, random_state=42
-)
-
-# Standardize features
-# scaler = MinMaxScaler()
-# X_f_train = scaler.fit_transform(X_f_train)
-# X_f_val = scaler.transform(X_f_val)
+idx_train = np.where(sdss_x_ztf_features['is_test'] == False)[0]
+idx_val = np.where(sdss_x_ztf_features['is_test'] == True)[0]
+X_train = [X[i] for i in idx_train]
+X_val =   [X[i] for i in idx_val]
+y_train = [y[i] for i in idx_train]
+y_val =   [y[i] for i in idx_val]
 
 # Load weights finetuned to our data
 astromer = SingleBandEncoder()
 astromer = astromer.from_pretraining('ztfg')
-astromer.load_weights(os.path.join(PROJECT_PATH, 'outputs/models/astromer_{}'.format(filter)))
+astromer.load_weights(os.path.join(PROJECT_PATH, path_astromer))
 
 # Create TF model
 astromer_encoder = astromer.model.get_layer('encoder')
 classifier = build_model(model_type, encoder=astromer_encoder, n_classes=len(np.unique(y)), maxlen=astromer.maxlen,
-                         train_astromer=True)  # n_features=X_f_train.shape[1]
+                         train_astromer=True)
+
+# Shuffle training data and keep the suffling index
+np.random.seed(546)
+index_rnd = np.random.permutation(len(X_train))
+index_org = np.argsort(index_rnd)
+X_train = [X_train[i] for i in index_rnd]
+y_train = [y_train[i] for i in index_rnd]
 
 train_batches = make_pretraining(
     X_train, labels=y_train, n_classes=3, batch_size=batch_size, shuffle=False,
     sampling=True, max_obs=200, msk_frac=0., rnd_frac=0., same_frac=0., repeat=1,
-)  # features=X_f_train, num_cls=3
+)
 
 validation_batches = make_pretraining(
     X_val, labels=y_val, n_classes=3, batch_size=batch_size, shuffle=False,
     sampling=True, max_obs=200, msk_frac=0., rnd_frac=0., same_frac=0., repeat=1,
-)  # features=X_f_val, num_cls=3
+)
 
 # Make callbacks
 callbacks = [EarlyStopping(patience=early_stopping)]
-if not is_test:
+if not args.is_test:
     log_dir = os.path.join(PROJECT_PATH, 'outputs/tensorboard/{}'.format(experiment_name))
     callbacks.append(TensorBoard(log_dir=log_dir, histogram_freq=1))
+if args.with_save:
+    file_name = 'outputs/models/ZTF_{}/{}'.format(ztf_date, experiment_name)
+    model_file_path = os.path.join(PROJECT_PATH, file_name)
+    callbacks.append(ModelCheckpoint(filepath=model_file_path, save_weights_only=True, save_best_only=True, verbose=1))
 
+# Fit the model
 history = classifier.fit(
     train_batches, validation_data=validation_batches, epochs=epochs, callbacks=callbacks,
 )
 
 # Iterate train and validation batches, train needed for ensembling
 for label, batches, y_true in [('train', train_batches, y_train), ('val', validation_batches, y_val)]:
-
     # Make preds
     y_pred = classifier.predict(batches)
+    # If train then undo the shuffling
+    if label == 'train':
+        y_pred = [y_pred[i] for i in index_org]
+        y_true = [y_true[i] for i in index_org]
+    # Get class labels
     y_class = np.argmax(y_pred, 1)
 
-    # Save preds
-    df = pd.DataFrame(y_pred, columns=['GALAXY', 'QSO', 'STAR'])
-    num_to_class_dict = {v: k for k, v in class_dict.items()}
-    df['y_pred'] = [num_to_class_dict[y] for y in y_class]
-    df['y_true'] = [num_to_class_dict[y] for y in y_true]
+    print(label)
+    print('accuracy: ', np.round(accuracy_score(y_true, y_class), 2))
+    print('f1: ', np.round(f1_score(y_true, y_class, average=None), 2))
 
-    outputs_file_path = os.path.join(PROJECT_PATH, 'outputs/preds/{}__{}.csv'.format(experiment_name, label))
-    df.to_csv(outputs_file_path, index=False)
-    print('Predictions {} saved to: {}'.format(label, outputs_file_path))
+    # Save preds
+    if not args.is_test:
+        df = pd.DataFrame(y_pred, columns=['GALAXY', 'QSO', 'STAR'])
+        num_to_class_dict = {v: k for k, v in class_dict.items()}
+        df['y_pred'] = [num_to_class_dict[y] for y in y_class]
+        df['y_true'] = [num_to_class_dict[y] for y in y_true]
+
+        file_name = 'outputs/preds/ZTF_{}/{}__{}.csv'.format(ztf_date, experiment_name, label)
+        outputs_file_path = os.path.join(PROJECT_PATH, file_name)
+        df.to_csv(outputs_file_path, index=False)
+        print('Predictions {} saved to: {}'.format(label, outputs_file_path))

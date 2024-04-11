@@ -1,18 +1,16 @@
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-import seaborn as sns
-from tqdm.notebook import tqdm
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, accuracy_score, \
-                            f1_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, accuracy_score, f1_score
 
-from utils import pretty_print
+from utils import pretty_print, pretty_print_features
 
 
-def print_summary_table(results_dict, filters=None, concise=False):
+def print_summary_table(results_dict, labels=None, filters=None, concise=False):
     filters = ['g', 'r'] if not filters else filters
-
-    df = stack_summary_tables([get_summary_table(results_dict, data_label, filters, concise) for data_label in tqdm(results_dict[filters[0]].keys())], filters)
+    data_labels = [label[0] for label in labels] if labels else list(results_dict[filters[0]].keys())
+    feature_labels = [label[1] for label in labels] if labels else [None] * len(data_labels)
+    df = stack_summary_tables([get_summary_table(results_dict, data_labels[i], filters, feature_labels[i]) for i in range(len(data_labels))], filters)
 
     if concise:
         new_column_order = ['data', 'features']
@@ -49,13 +47,10 @@ def stack_summary_tables(tables, filters):
     return pd.concat(tables, ignore_index=True)
 
 
-def get_summary_table(results_dict, data_label, filters, concise=False):
+def get_summary_table(results_dict, data_label, filters, feature_labels=None):
     summary_df = pd.DataFrame()
-    feature_labels = get_feature_labels(results_dict[filters[0]][data_label].columns)
-
-    if concise:
-        n_surveys = len(data_label.split('_'))
-        feature_labels = [label for label in feature_labels if len(label.split(' + ')) == 1 or len(label.split(' + ')) == n_surveys + 1]  # +1 because AstrmClf
+    if feature_labels is None:
+        feature_labels = get_feature_labels(results_dict[filters[0]][data_label].columns)
 
     for i, feature_label in enumerate(feature_labels):
         new_row = {
@@ -127,28 +122,6 @@ def make_report(results_df, feature_importances=None, label=None):
     for x in x_to_run:
         plot_results_as_function(results_df, x=x, labels=[y_pred_column], with_accuracy=True)
 
-    # Plot histograms of T/F P/N as functions of magnitude, redshift and number of observations
-    # results_df['classification outcome'] = results_df.apply(get_clf_label, args=(y_pred_column,), axis=1)
-    # data = results_df.dropna(subset=['classification outcome'])
-    # data = data.loc[(data['redshift'] < 5) & (data['mag_median'] > 16)]
-
-    # plt.figure()
-    # hue_order = ['TP: QSO', 'FN: galaxy', 'FN: star', 'FP: galaxy', 'FP: star']
-    # sns.histplot(
-    #     data, x=x, hue='classification outcome', element='step', fill=False,
-    #     log_scale=[False, True], hue_order=hue_order,
-    # )
-
-    # xlim_dict = {
-    #     'n_obs': None,
-    #     'mag_median': [16, 22],
-    #     'redshift': [0, 5],
-    # }
-    # plt.xlim(xlim_dict[x])
-    # plt.xlabel(pretty_print(x))
-    # plt.ylabel('counts per bin')
-    # plt.show()
-
     # Feature importance
     if feature_importances is not None:
         plot_feature_ranking(feature_importances['features'], feature_importances['importances'],
@@ -174,8 +147,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     min, max = 1, 0
     for y_pred_column in labels:
         acc = groups.apply(lambda x: accuracy_score(x['y_true'], x[y_pred_column]))
-        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None,
-                                                    labels=['GALAXY', 'QSO', 'STAR'], zero_division=0)[1])
+        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None)[1])
 
         # Plot only bins with enough number of QSOs
         acc, qso_f1 = acc[mask], qso_f1[mask]
@@ -184,10 +156,11 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
         min = np.min([min, acc.min(), qso_f1.min()]) if with_accuracy else np.min([min, qso_f1.min()])
         max = np.max([max, acc.max(), qso_f1.max()]) if with_accuracy else np.max([max, qso_f1.max()])
 
-        model_label = ' '.join(y_pred_column.split(' ')[1:])
+        label = pretty_print_features(' '.join(y_pred_column.split(' ')[1:]))
         if with_accuracy:
-            plt.plot(mid_points, acc, label='3-class accuracy {}'.format(model_label), alpha=0.9)
-        plt.plot(mid_points, qso_f1, label='QSO F1 {}'.format(model_label), alpha=0.9)
+            plt.plot(mid_points, acc, label='3-class accuracy {}'.format(label), alpha=0.9)
+            label = 'QSO F1 {}'.format(label)
+        plt.plot(mid_points, qso_f1, label=label, alpha=0.9)
 
     n_qso = n_qso[mask]
     # Transfer n_obj into zero one
@@ -200,22 +173,16 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     plt.xlabel(pretty_print(x))
     if x in ['n_obs', 'n_obs_200']:
         plt.xscale('log')
-    plt.legend()
+    legend_loc = {
+        'mag_median': 'lower right',
+        'redshift': 'lower center',
+        'n_obs': 'lower center',
+        'cadence_mean': 'lower center',
+        'cadence_std': 'upper right',
+    }
+    loc = legend_loc[x] if x in legend_loc else None
+    plt.legend(loc=loc)
     plt.show()
-
-def get_clf_label(row, y_pred_column=None):
-    y_pred_column = y_pred_column if y_pred_column else 'y_pred'
-    labels = [
-        ('TP: QSO', 'QSO', 'QSO'),
-        ('FN: galaxy', 'QSO', 'GALAXY'),
-        ('FN: star', 'QSO', 'STAR'),
-        ('FP: galaxy', 'GALAXY', 'QSO'),
-        ('FP: star', 'STAR', 'QSO'),
-    ]
-    for clf_label, y_true, y_pred in labels:
-        if (row['y_true'] == y_true) & (row[y_pred_column] == y_pred):
-            return clf_label
-    return None
 
 
 def plot_confusion_matrix(y_test, y_pred, labels):
