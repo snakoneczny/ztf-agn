@@ -1,13 +1,17 @@
 import random
 from copy import deepcopy
 from datetime import timedelta
+from multiprocessing import Pool
+import gc
 
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
+from tqdm.autonotebook import tqdm
 from astropy import time
-from tqdm.notebook import tqdm
+import astropy.units as u
+from astropy.coordinates import SkyCoord
 
 
 def get_data_stats(data):
@@ -47,7 +51,7 @@ def get_data_stats(data):
 
 
 def add_lc_stats(data):
-    for i in tqdm(range(len(data))):
+    for i in tqdm(range(len(data)), 'Adding light curve statistics'):
         data[i]['mag median'] = np.median(data[i]['mag'])
         data[i]['mag err mean'] = np.mean(data[i]['magerr'])
 
@@ -57,26 +61,57 @@ def add_lc_stats(data):
             data[i]['timespan'] = mjds[-1] - mjds[0]
 
         if len(mjds) > 1:
-            cadences = [mjds[j + 1] - mjds[j] for j in range(len(mjds) - 1)]
-            data[i]['cadence mean'] = np.mean(cadences)
-            data[i]['cadence median'] = np.median(cadences)
+            intervals = [mjds[j + 1] - mjds[j] for j in range(len(mjds) - 1)]
+            data[i]['cadence mean'] = np.mean(intervals)
+
+            percentiles = np.percentile(intervals, [16, 50, 84])
+            diff = np.diff(percentiles)
+            data[i]['cadence median'] = percentiles[1]
+            data[i]['cadence plus sigma'] = diff[1]
+            data[i]['cadence minus sigma'] = diff[0]
 
     return data
 
 
-def preprocess_ztf_light_curves(data):
+def preprocess_ztf_light_curves(data, data_sdss=None, data_features=None, min_n_obs=20, with_multiprocessing=True):
     original_size = len(data)
-    print('Original data size: {}'.format(original_size))
-
-    # Remove deep drilling
-    data = [average_nights(lc_dict) for lc_dict in tqdm(data) if len(lc_dict['mjd']) > 20]
-    print('Removing deep drilling at n_obs > 20: {} ({:.2f}%)'.format(len(data), len(data) / original_size * 100))
+    print('Preprocessing input data size: {}'.format(original_size))
 
     # Get at least 21 observations
-    data = [lc_dict for lc_dict in data if len(lc_dict['mjd']) > 20]
-    print('Number of observations higher than 20: {} ({:.2f}%)'.format(len(data), len(data) / original_size * 100))
+    n_obs = [len(lc_dict['mjd']) for lc_dict in data]
+    idx = np.array(n_obs) > min_n_obs
+    data = np.array(data)[np.where(idx)]
+    if data_sdss is not None:
+        data_sdss = data_sdss.loc[idx].reset_index(drop=True)
+    if data_features is not None:
+        data_features = data_features.loc[idx].reset_index(drop=True)
+    gc.collect()
 
-    return data
+    # Remove deep drilling
+    if with_multiprocessing:
+        with Pool(24) as p:
+            data = p.map(average_nights, data)
+    else:
+            data = [average_nights(lc_dict) for lc_dict in tqdm(data, 'Averaging nights')]
+    gc.collect()
+
+    # Get at least 21 observations after the deep drilling
+    n_obs = [len(lc_dict['mjd']) for lc_dict in data]
+    idx = np.array(n_obs) > min_n_obs
+    data = np.array(data)[np.where(idx)]
+    if data_sdss is not None:
+        data_sdss = data_sdss.loc[idx].reset_index(drop=True)
+    if data_features is not None:
+        data_features = data_features.loc[idx].reset_index(drop=True)
+    print('Deep drilling and n_obs > 20: {} ({:.2f}%)'.format(len(data), len(data) / original_size * 100))
+    gc.collect()
+
+    if data_sdss is not None and data_features is not None:
+        return data, data_sdss, data_features
+    elif data_sdss is not None:
+        return data, data_sdss
+    else:
+        return data
 
 
 def average_nights(lc_dict):
@@ -95,7 +130,7 @@ def average_nights(lc_dict):
 
 
 def limit_date(data, date):
-    return [limit_date_on_lc(lc_dict, date=date) for lc_dict in tqdm(data)]
+    return [limit_date_on_lc(lc_dict, date=date) for lc_dict in data]
 
 
 def limit_date_on_lc(lc_dict, date):
@@ -143,6 +178,83 @@ def subsample_light_curves(light_curves, features_df=None, minimum_timespan=1000
             lc_sampled[i][dict_key] = lc_sampled[i][dict_key][idx_goal]
 
     return lc_sampled, features_df, n_obs_goal
+
+
+def get_longests(data_ztf, data_sdss, data_features=None):
+    data_ztf_dict = {'g': [], 'r': []}
+    indices_sdss_dict = {'g': [], 'r': []}
+    
+    for i in range(len(data_ztf)):
+        for filter in ['g', 'r']:
+            cross_match_dict = data_ztf[i]
+            
+            # Check if a cross-match is present in the given filter
+            if len(cross_match_dict['mjd_{}'.format(filter)]) > 0:
+                
+                # Remove too large distances, unknown error
+                # distances = [math.sqrt((data_ztf[i]['ra_{}'.format(filter)][j] - data_sdss.loc[i, 'PLUG_RA']) ** 2 +
+                #             (data_ztf[i]['dec_{}'.format(filter)][j] - data_sdss.loc[i, 'PLUG_DEC']) ** 2)
+                #                 for j in range(len(data_ztf[i]['ra_{}'.format(filter)]))]
+                pos_sdss = SkyCoord(data_sdss.loc[i, 'PLUG_RA'] * u.degree, data_sdss.loc[i, 'PLUG_DEC'] * u.degree)
+                distances = []
+                for j in range(len(data_ztf[i]['ra_{}'.format(filter)])):
+                    pos_ztf = SkyCoord(
+                        data_ztf[i]['ra_{}'.format(filter)][j] * u.degree,
+                        data_ztf[i]['dec_{}'.format(filter)][j] * u.degree,
+                    )
+                    distances.append(pos_sdss.separation(pos_ztf).arcsecond)
+                
+                idx_ok = np.where(np.array(distances) < 1)[0]
+
+                # If at least one good cross-match present
+                if len(idx_ok) > 0:
+                    # Add a proper index to the SDSS data frame
+                    indices_sdss_dict[filter].append(i)
+
+                    # Find the longest light curve within the accepted distances
+                    mjds_arr = cross_match_dict['mjd_{}'.format(filter)]
+                    n_obs = [len(mjds_arr[j]) for j in idx_ok]
+                    idx_max = idx_ok[np.argmax(n_obs)]
+
+                    # Add the longest light curve to the resulting data
+                    new_row = {}
+                    for key in ['id', 'ra', 'dec']:
+                        new_row[key] = cross_match_dict['{}_{}'.format(key, filter)]
+                    for key in ['mjd', 'mag', 'magerr']:
+                        new_row[key] = cross_match_dict['{}_{}'.format(key, filter)][idx_max]
+                    data_ztf_dict[filter].append(new_row)
+
+    # Extract rows from the SDSS data frame
+    data_sdss_dict = {}
+    for filter in ['g', 'r']:
+        data_sdss_dict[filter] = data_sdss.loc[indices_sdss_dict[filter]].reset_index(drop=True)
+
+    if data_features is not None:
+        data_features_dict = {}
+        for filter in ['g', 'r']:
+            data_features_dict[filter] = data_features.loc[indices_sdss_dict[filter]].reset_index(drop=True)
+
+        return data_ztf_dict, data_sdss_dict, data_features_dict
+
+    else:
+        return data_ztf_dict, data_sdss_dict
+
+
+def get_singles(data_ztf, data_sdss):
+    # Singles
+    idx_singles = [i for i in range(len(data_ztf)) if (len(data_ztf[i]['id_g']) == 1 and len(data_ztf[i]['id_r']) == 1 and len(data_ztf[i]['mjd_g'][0]) > 0 and len(data_ztf[i]['mjd_r'][0]) > 0)]
+
+    data_ztf_singles = dict([(filter, get_filter(data_ztf[idx_singles], filter)) for filter in ['g', 'r']])
+    data_sdss_singles = data_sdss.loc[idx_singles].reset_index(drop=True)
+
+    # Get rid of a left over dimension
+    for filter in ['g', 'r']:
+        for i in range(len(data_ztf_singles[filter])):
+            for key in ['id', 'ra', 'dec', 'mjd', 'mag', 'magerr']:
+                if key in data_ztf_singles[filter][i]:
+                    data_ztf_singles[filter][i][key] = data_ztf_singles[filter][i][key][0]
+
+    return data_ztf_singles, data_sdss_singles
 
 
 def get_filter(ztf_data, filter):

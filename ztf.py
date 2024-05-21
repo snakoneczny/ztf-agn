@@ -1,19 +1,108 @@
 from collections import defaultdict
 from multiprocessing import Pool
 import gc
+import math
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 from penquins import Kowalski
-
-from data import ZTF_FILTER_NAMES
 
 
 ZTF_FILTER_NAMES = {1: 'g', 2: 'r', 3: 'i'}
 
+TEST_FIELDS = [296, 297, 423, 424, 487, 488, 562, 563, 682, 683, 699, 700, 717, 718, 777, 778, 841, 842, 852, 853]
 
-def get_ztf_field_ids(field_id, kowalski, filter=1, verbose=0):
+ZTF_DATES = {
+    'DR 5': '20210401',
+    'DR 16': '20230821',
+    'DR 20': '20240117',
+}
+
+ZTF_LAST_DATES = {
+    'DR 5': 59243.22367999982,
+    'DR 16': 60133.4643600001,
+    'DR 20': 60247.40577000007,
+}
+
+CATALOGS_DICT = {
+    'ZTF': {
+        'projection': {
+            '_id': 1,
+            'filter': 1,
+            'data.ra': 1,
+            'data.dec': 1,
+            'data.catflags': 1,
+            'data.hjd': 1,
+            'data.mag': 1,
+            'data.magerr': 1,
+        }
+    },
+    'PS1_DR1': {
+        'projection': {
+            '_id': 0,
+            'gMeanPSFMag': 1,
+            'rMeanPSFMag': 1,
+            'iMeanPSFMag': 1,
+            'zMeanPSFMag': 1,
+        }
+    },
+    'AllWISE': {
+        'projection': {
+            '_id': 0,
+            'w1mpro': 1,
+            'w2mpro': 1,
+            'w3mpro': 1,
+            'w4mpro': 1,
+        }
+    },
+    'Gaia_EDR3': {
+        'projection': {
+            '_id': 0,
+            'phot_g_mean_mag': 1,
+            'phot_bp_mean_mag': 1,
+            'phot_rp_mean_mag': 1,
+            'phot_bp_rp_excess_factor': 1,
+            'astrometric_excess_noise': 1,
+            'parallax': 1,
+            'parallax_error': 1,
+            'pmra': 1,
+            'pmra_error': 1,
+            'pmdec': 1,
+            'pmdec_error': 1,
+        }
+    },
+}
+
+
+def get_ztf_light_curves(ids, date, kowalski):
+    chunk_size = 10000
+    n_threads = 10
+    n_batch_queries = n_threads
+    
+    # Make chunked queries
+    queries = [get_light_curves_query(ids[i:i + chunk_size], date) for i in range(0, len(ids), chunk_size)]
+    # Make batched queries
+    queries = [queries[i:i + n_batch_queries] for i in range(0, len(queries), n_batch_queries)]
+
+    to_return = []
+    for query in tqdm(queries):
+        responses = kowalski.query(queries=query, use_batch_query=True, max_n_threads=10)        
+        
+        data = np.concatenate([response.get('data') for response in responses.get('default')])
+        data = sorted(data, key=lambda d: d['_id'])
+
+        # with Pool(24) as p:
+        #     data = p.map(process_ztf_record, data)
+        data = [process_ztf_record(lc_dict) for lc_dict in data]
+
+        to_return.extend(data)
+        gc.collect()
+
+    return to_return
+
+
+def get_ztf_field_ids(field_id, date, kowalski, filter=1, verbose=0):
     limit = 20000
     n_threads = 10
     n_batch_queries = n_threads
@@ -22,8 +111,9 @@ def get_ztf_field_ids(field_id, kowalski, filter=1, verbose=0):
     still_working = True
     next_batch = 0
     while still_working:
-        queries = [get_field_ids_query(field_id, limit, next_batch + j * limit, filter) for j in range(n_batch_queries)]
+        queries = [get_field_ids_query(field_id, date, limit, next_batch + j * limit, filter) for j in range(n_batch_queries)]
         responses = kowalski.query(queries=queries, use_batch_query=True, max_n_threads=n_threads)
+        
         data_arr = [response.get('data') for response in responses.get('default')]
         data = sorted([obj['_id'] for obj in np.concatenate(data_arr)])
 
@@ -37,52 +127,45 @@ def get_ztf_field_ids(field_id, kowalski, filter=1, verbose=0):
     return to_return
 
 
-def get_ztf_light_curves(ids, kowalski):
-    chunk_size = 10000
-    n_threads = 10
-    n_batch_queries = n_threads
-
-    # Make chunked queries
-    queries = [get_light_curves_query(ids[i:i + chunk_size]) for i in range(0, len(ids), chunk_size)]
-    # Make batched queries
-    queries = [queries[i:i + n_batch_queries] for i in range(0, len(queries), n_batch_queries)]
-
-    to_return = []
-    for query in tqdm(queries):
-        responses = kowalski.query(queries=query, use_batch_query=True, max_n_threads=10)
-        data = np.concatenate([response.get('data') for response in responses.get('default')])
-        data = sorted(data, key=lambda d: d['_id'])
-
-        with Pool(48) as p:
-            data = p.map(process_ztf_record, data)
-
-        to_return.extend(data)
-
-        gc.collect()
-
-    return to_return
-
-
-def get_ztf_features(ids, token, get_classification=False):
+def get_ztf_features(ids, date, token, get_classification=False):
     chunk_size = 1000
     to_process = [ids[i:i + chunk_size] for i in range(0, len(ids), chunk_size)]
 
     kowalski = Kowalski(token=token, host='gloria.caltech.edu', protocol='https', port=443, timeout=99999999)
 
-    data = [get_ztf_features_data(ids_chunk, kowalski, get_classification) for ids_chunk in tqdm(to_process)]
+    data = [get_ztf_features_data(ids_chunk, date, kowalski, get_classification) for ids_chunk in tqdm(to_process)]
     data = np.concatenate(data)
 
     return pd.DataFrame.from_records(data)
 
 
-def get_ztf_features_data(id_list, kowalski, get_classification):
-    query = get_classification_query(id_list) if get_classification else get_features_query(id_list)
+def get_ztf_features_data(id_list, date, kowalski, get_classification):
+    query = get_classification_query(id_list, date) if get_classification else get_features_query(id_list)
     response = kowalski.query(query=query)
     data = response.get('default').get('data')
     return data
 
 
-def get_ztf_matches(coordinates, kowalski, radius=1.):
+def get_cross_matches(coordinates, catalogs, kowalski, radius=1.0):
+    records = [get_cross_match_record(ra, dec, catalogs, kowalski, radius=radius) for ra, dec in tqdm(coordinates, 'Running near queries')]
+    columns = ['{}__{}'.format(catalog, k) for catalog in catalogs for k in CATALOGS_DICT[catalog]['projection'] if k != '_id']
+    print('Constructing a data frame')
+    df = pd.DataFrame.from_records(records, columns=columns) 
+    return df
+
+
+def get_cross_match_record(ra, dec, catalogs, kowalski, radius=1.0):
+    if not math.isnan(ra) and not math.isnan(dec):
+        q = get_near_query(ra, dec, radius, catalogs)
+        response = kowalski.query(query=q)
+        response = response.get('default').get('data')
+        record = {'{}__{}'.format(catalog, k): v for catalog in catalogs if len(response[catalog]['query_coords']) > 0 for k, v in response[catalog]['query_coords'][0].items()}
+        return record
+    else:
+        return {}
+
+
+def get_ztf_matches(coordinates, date, kowalski, radius=1.):
     original_coord_len = len(coordinates)
     filter_names = {1: 'g', 2: 'r', 3: 'i'}
 
@@ -92,21 +175,32 @@ def get_ztf_matches(coordinates, kowalski, radius=1.):
 
     results = []
     for coords in coordinates:
-        q = [get_cone_query(ra, dec, radius) for ra, dec in coords]
+        q = [get_cone_query(ra, dec, radius, ztf_date=date) for ra, dec in coords]
         responses = kowalski.query(queries=q, use_batch_query=True, max_n_threads=10)
         responses = responses.get('default')
 
+        # Sort the responses according to the original coordinate values
+        resulting_coords = [list(r['data']['ZTF_sources_20230821'].keys())[0] for r in responses]
+        processed_coords = []
+        for x in resulting_coords:
+            splitted = x[1:-1].split(', ')
+            coord = [float(v.replace('_', '.')) for v in splitted]
+            processed_coords.append((coord[0], coord[1]))
+        idx_sort = [coords.index(x) for x in processed_coords]
+        responses = [x for _, x in sorted(zip(idx_sort, responses))]
+
         for r in responses:
-            data = r['data']['ZTF_sources_20240117']
+            data = r['data']['ZTF_sources_20230821']
             row = defaultdict(list)
 
             for pos in data.keys():  # that's always just one element, why?                
                 for match in data[pos]:
-                    id = match['_id']
                     filter = filter_names[match['filter']]
                     df = clean_ztf_record(match)
 
-                    row['id_{}'.format(filter)].append(id)
+                    row['id_{}'.format(filter)].append(match['_id'])
+                    row['ra_{}'.format(filter)].append(df['ra'].mean())
+                    row['dec_{}'.format(filter)].append(df['dec'].mean())
                     row['mjd_{}'.format(filter)].append(df['hjd'].to_numpy())
                     row['mag_{}'.format(filter)].append(df['mag'].to_numpy())
                     row['magerr_{}'.format(filter)].append(df['magerr'].to_numpy())
@@ -123,12 +217,11 @@ def process_ztf_record(ztf_record):
     row = {}
     row['id'] = ztf_record['_id']
     row['filter'] = ZTF_FILTER_NAMES[ztf_record['filter']]
-
-    for x in ['field', 'ra', 'dec']:
-        if x in ztf_record:
-            row[x] = ztf_record[x]    
+    row['field'] = ztf_record['field']
 
     df = clean_ztf_record(ztf_record)
+    row['ra'] = df['ra'].mean()
+    row['dec'] = df['dec'].mean()
     row['mjd'] = df['hjd'].to_numpy()
     row['mag'] = df['mag'].to_numpy()
     row['magerr'] = df['magerr'].to_numpy()
@@ -138,17 +231,17 @@ def process_ztf_record(ztf_record):
 
 def clean_ztf_record(ztf_record):
     df = pd.DataFrame(ztf_record['data'])
-    df = df.loc[df['catflags'] < 32768, ['hjd', 'mag', 'magerr']].dropna(axis=0)
+    df = df.loc[df['catflags'] < 32768, ['ra', 'dec', 'hjd', 'mag', 'magerr']].dropna(axis=0)
     df['hjd'] -= 2400000.5
     df = df.sort_values(by='hjd')
     return df
 
 
-def get_light_curves_query(ids):
+def get_light_curves_query(ids, date):
     query = {
         'query_type': 'find',
         'query': {
-            'catalog': 'ZTF_sources_20240117',
+            'catalog': 'ZTF_sources_{}'.format(date),
             'filter': {
                 '_id': {'$in': list(map(int, ids))}
             },
@@ -171,11 +264,11 @@ def get_light_curves_query(ids):
     return query
 
 
-def get_field_ids_query(field_id, limit, skip, filter):
+def get_field_ids_query(field_id, date, limit, skip, filter):
     query = {
         'query_type': 'find',
         'query': {
-            'catalog': 'ZTF_sources_20240117',
+            'catalog': 'ZTF_sources_{}'.format(date),
             'filter': {
                 'field': {'$eq': field_id},
                 'filter': {'$eq': filter},
@@ -193,7 +286,7 @@ def get_field_ids_query(field_id, limit, skip, filter):
     return query
 
 
-def get_features_query(id_list):
+def get_features_query(id_list, date):
     query = {
         'query_type': 'find',
         'query': {
@@ -204,7 +297,7 @@ def get_features_query(id_list):
     return query
 
 
-def get_classification_query(id_list):
+def get_classification_query(id_list, date):
     query = {
         'query_type': 'find',
         'query': {
@@ -227,8 +320,26 @@ def get_classification_query(id_list):
     return query
 
 
-def get_cone_query(ra, dec, radius):
-    query = {
+def get_near_query(ra, dec, radius, catalogs):
+    return {
+        'query_type': 'near',
+        'query': {
+            'max_distance': radius,
+            'distance_units': 'arcsec',
+            'radec': {'query_coords': [ra, dec]},
+            'catalogs': {
+                catalog: CATALOGS_DICT[catalog] for catalog in catalogs
+            },
+        },
+        'kwargs': {
+            'max_time_ms': 60000,  # 1 minute
+            'limit': 1,
+        },
+    }
+
+
+def get_cone_query(ra, dec, radius, ztf_date=None, catalogs=None):
+    return {
         'query_type': 'cone_search',
         'query': {
             'object_coordinates': {
@@ -237,20 +348,7 @@ def get_cone_query(ra, dec, radius):
                 'cone_search_unit': 'arcsec'
             },
             'catalogs': {
-                'ZTF_sources_20240117': {
-                    'filter': {},
-                    'projection': {
-                        '_id': 1,
-                        'filter': 1,
-                        'data.ra': 1,
-                        'data.dec': 1,
-                        'data.catflags': 1,
-                        'data.hjd': 1,
-                        'data.mag': 1,
-                        'data.magerr': 1,
-                    }
-                }
-            }
+                'ZTF_sources_{}'.format(ztf_date): CATALOGS_DICT['ZTF']
+            },
         }
     }
-    return query

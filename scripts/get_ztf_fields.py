@@ -1,43 +1,95 @@
 import sys
 import os
 import pickle
+import lzma
+import gc
 
 import numpy as np
-from penquins import Kowalski
+import pandas as pd
+import json
 from tqdm import tqdm
+from penquins import Kowalski
 
 sys.path.append('..')
-from env_config import DATA_PATH
-from ztf import ZTF_FILTER_NAMES, get_ztf_light_curves
+from env_config import DATA_PATH, STORAGE_PATH
+from credentials import KOWALSKI_USERNAME, KOWALSKI_PASSWORD
+from ztf import ZTF_DATES, get_ztf_light_curves
+from utils import save_fits
 
 
-fields = [296, 297, 423, 424, 487, 488, 562, 563, 682, 683, 699, 700, 717, 718, 777, 778, 841, 842, 852, 853]
+date = ZTF_DATES['DR 20']
+filter_name = 'g'
 
-for filter in [1, 2]:
-    filter_name = ZTF_FILTER_NAMES[filter]
+# Read number of objects in the fields
+with open(os.path.join(DATA_PATH, 'ZTF/DR19_field_counts.json'), 'r') as file:
+    fields_dict = json.load(file)
+fields_dict = {int(k): int(v) for k, v in fields_dict.items()}
+fields = [k for k in fields_dict if fields_dict[k] > 0]
 
-    for field in tqdm(fields):
-        output_file_name = 'ZTF/ZTF_20240117/fields/ZTF_20240117__field_{}__{}-band'.format(field, filter_name)
-        output_file_name = os.path.join(DATA_PATH, output_file_name)
-        
-        if not os.path.exists(output_file_name):
+# Get only the test fields
+# test_fields = TEST_FIELDS
+# fields = [k for k in fields if k in test_fields]
+
+# Get a chunk of fields
+fields = fields[:500]
+
+# Scan for files
+to_process, n_obj = [], []
+for field in fields:
+    file_name = 'ZTF/ZTF_{}/fields/ZTF_{}__field_{}__{}-band.xz'.format(
+        date, date, field, filter_name)
+    file_path = os.path.join(STORAGE_PATH, file_name)
+    if not os.path.exists(file_path):
+        to_process.append(field)
+        n_obj.append(fields_dict[field])
+
+# Progress
+all_data = sum(n_obj)
+done_data = 0
+
+with tqdm('Downloading data', total=all_data) as pbar:
+
+    for i, field in enumerate(to_process):
+        gc.collect()
+
+        output_file_name = 'ZTF/ZTF_{}/fields/ZTF_{}__field_{}__{}-band'.format(
+            date, date, field, filter_name)
+        output_file_name = os.path.join(STORAGE_PATH, output_file_name)
+
+        ids_file_name = 'ZTF/ZTF_{}/field_IDs/ZTF_{}__field_{}__{}-band__IDs.npy'.format(
+                date, date, field, filter_name)
+        ids_file_name = os.path.join(DATA_PATH, ids_file_name)
+
+        if not os.path.exists(output_file_name + '.xz') and os.path.exists(ids_file_name):
             print('Processing filter: {}, field: {}'.format(filter_name, field))
 
             kowalski = Kowalski(
-                username='nakonecz',
-                password='%p!Sn8YVP12h',
+                username=KOWALSKI_USERNAME,
+                password=KOWALSKI_PASSWORD,
                 host='melman.caltech.edu',
                 timeout=99999999,
             )
 
             # Read the IDs
-            file_name = 'ZTF/ZTF_20240117/field_IDs/ZTF_20240117__field_{}__{}-band__IDs.npy'.format(field, filter_name)
-            file_name = os.path.join(DATA_PATH, file_name)
-            with open(file_name, 'rb') as file:
+            with open(ids_file_name, 'rb') as file:
                 ids = np.load(file)
 
-            data = get_ztf_light_curves(ids, kowalski)
+            data = get_ztf_light_curves(ids, date, kowalski)
+            
+            # Extract DF and array
+            df = pd.DataFrame(data, columns=['id', 'ra', 'dec', 'n obs'])
+            df['n obs'] = [len(lc_dict['mjd']) for lc_dict in data]
+            data = [np.array([lc_dict['mjd'], lc_dict['mag'], lc_dict['magerr']]) for lc_dict in data]
+            gc.collect()
 
-            with open(output_file_name, 'wb') as file:
-                pickle.dump(data, file)
-            print('Original IDs: {}, light curves: {}, saved to: {}'.format(len(ids), len(data), output_file_name))
+            # Save both
+            save_fits(df, output_file_name + '.fits', overwrite=True, with_print=False)
+            with lzma.open(output_file_name + '.xz', 'wb') as f:
+                pickle.dump(data, f)
+
+            # Update the progress
+            pbar.update(n_obj[i])
+            print('Original IDs: {}, light curves: {}, saved to: {}'.format(
+                len(ids), len(data), output_file_name))
+
+            kowalski.close()

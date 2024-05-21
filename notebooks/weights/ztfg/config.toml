@@ -1,0 +1,85 @@
+[general]
+code_root = "."
+creation_date = "2022-12-29"
+gpu = 0
+
+[astromer]
+layers = 2
+heads = 4
+head_dim = 64
+dff = 128
+dropout = 0.1
+window_size = 200
+
+[masking]
+mask_frac = 0.5
+rnd_frac = 0.2
+same_frac = 0.2
+
+[positional]
+base = 1000
+version = "v1"
+
+[pretraining]
+exp_path = "./presentation/experiments/astromer_0/results/ztfg/pretraining"
+lr = 0.001
+scheduler = true
+epochs = 10000
+patience = 40
+
+[pretraining.data]
+path = "./data/records/ztfg_pt"
+batch_size = 2500
+repeat = 1
+sampling = true
+normalize = true
+shuffle_train = true
+shuffle_val = false
+shuffle_test = false
+cache_train = true
+cache_val = true
+cache_test = false
+
+[finetuning]
+exp_path = "./presentation/experiments/astromer_0/results/ztfg/alcock/finetuning/alcock_100_f0"
+weights = "./presentation/experiments/astromer_0/results/ztfg/pretraining"
+lr = 0.001
+scheduler = true
+epochs = 10000
+patience = 20
+batch_size = 2500
+
+[finetuning.data]
+path = "./data/records/alcock/fold_0/alcock_100"
+batch_size = 512
+repeat = 1
+sampling = false
+normalize = true
+shuffle_train = true
+shuffle_val = false
+shuffle_test = false
+cache_train = true
+cache_val = false
+cache_test = false
+
+[classification]
+exp_path = "./presentation/experiments/astromer_0/results/ztfg/alcock/classification/a/alcock_100_f0"
+weights = "./presentation/experiments/astromer_0/results/ztfg/alcock/finetuning/alcock_100_f0"
+train_astromer = false
+lr = 0.001
+epochs = 10000
+patience = 20
+batch_size = 512
+
+[classification.data]
+path = "./data/records/alcock/fold_0/alcock_100"
+batch_size = 512
+repeat = 1
+sampling = false
+normalize = true
+shuffle_train = true
+shuffle_val = false
+shuffle_test = false
+cache_train = true
+cache_val = true
+cache_test = false

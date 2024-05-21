@@ -32,6 +32,15 @@ def pretty_print_features(x):
         return x
 
 
+def save_fits(data, file_path, overwrite=False, with_print=True):
+    if with_print:
+        print('Constructing an astropy table')
+    astropy_table = Table.from_pandas(data)
+    astropy_table.write(file_path, overwrite=overwrite)
+    if with_print:
+        print('Astropy table saved to: {}'.format(file_path))
+
+
 def read_fits_to_pandas(filepath, columns=None, n=None):
     table = Table.read(filepath, format='fits')
 

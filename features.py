@@ -1,9 +1,7 @@
 import os
 import copy
-from collections import defaultdict
 
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 from ASTROMER.models import SingleBandEncoder
 
@@ -30,9 +28,9 @@ FEATURES_DICT = {
     )),
     'astromer_min-max':
         ['astromer_{}_p{}'.format(att, p) for att in range(256) for p in [0, 2, 98, 100]],
-    'astromer_top_clf': pd.read_csv(
-        os.path.join(PROJECT_PATH, 'outputs/feature_importance/astromer_retrained-encoder_RF.csv')).loc[:256,
-                'feature'].values,
+    # 'astromer_top_clf': pd.read_csv(
+    #     os.path.join(PROJECT_PATH, 'outputs/feature_importance/astromer_retrained-encoder_RF.csv')).loc[:256,
+    #             'feature'].values,
     'AstrmClf': ['astrm_galaxy', 'astrm_qso', 'astrm_star'],
     'WISE': [
         'AllWISE__w1mpro', 'AllWISE__w2mpro', 'AllWISE__w3mpro', 'AllWISE__w4mpro',

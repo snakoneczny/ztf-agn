@@ -1,9 +1,11 @@
 import os
 import pickle
+import random
+from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
-from tqdm.notebook import tqdm
+from tqdm.autonotebook import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
@@ -13,10 +15,8 @@ from env_config import DATA_PATH, PROJECT_PATH
 from features import FEATURES_DICT
 
 
-def run_experiments(feature_labels, master_df, sdss_df, features_dict, filter=None):
+def run_experiments(feature_labels, master_df, features_dict, filter, ztf_date):
     data_labels = [label for label in feature_labels if label != 'AstrmClf']
-    if data_labels[0] != 'ZTF':
-        data_labels.insert(0, 'ZTF')
 
     # Define experiments concatenating all features
     to_process = [feature_labels]
@@ -24,60 +24,31 @@ def run_experiments(feature_labels, master_df, sdss_df, features_dict, filter=No
     if len(feature_labels) == 2:
         to_process = [[feature_label] for feature_label in feature_labels] + to_process
 
-    # Make always the same train test split on the master data frame
-    idx_train, idx_test = train_test_split(master_df.index, test_size=0.33, random_state=42)
-    master_df.loc[idx_test, 'is_test'] = True
-    master_df.loc[idx_train, 'is_test'] = False
-
-    # Pick only ZTF subset, required to add Astromer data
-    max_features = FEATURES_DICT['ZTF']
-    reduced_df = master_df.dropna(subset=max_features)
-    indices = reduced_df.index
-    reduced_df = reduced_df.reset_index(drop=True)
-    reduced_sdss = sdss_df.loc[indices].reset_index(drop=True)
-
-    # Add astromer classification features to the train and test data frames
+    # Add Astromer as features
     if 'AstrmClf' in feature_labels:
-        for is_test, df_label in [(True, 'val'), (False, 'train')]:
-            ztf_date = '20210401'
+        for split_label in ['train', 'val', 'test']:
             file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_ZTF__astromer_FC-1024-512-256__{}.csv'.format(
-                ztf_date, ztf_date, filter, df_label)
+                ztf_date, ztf_date, filter, split_label)
             file_path = os.path.join(PROJECT_PATH, file_name)
             if os.path.exists(file_path):
                 df_preds = pd.read_csv(file_path)
                 for class_label in ['GALAXY', 'QSO', 'STAR']:                
-                    reduced_df.loc[reduced_df['is_test'] == is_test, 'astrm_{}'.format(class_label.lower())] = df_preds[class_label].to_list()
+                    master_df.loc[master_df['train_split'] == split_label, 'astrm_{}'.format(class_label.lower())] = df_preds[class_label].to_list()
     
-    # Take all features together to reduce input data frames
-    max_features = np.concatenate([FEATURES_DICT[label] for label in data_labels])
-    reduced_df = reduced_df.dropna(subset=max_features)
-    indices = reduced_df.index
-    reduced_df = reduced_df.reset_index(drop=True)
-    reduced_sdss = reduced_sdss.loc[indices].reset_index(drop=True)
+    # Take all features together to reduce the input data frame
+    if len(data_labels) > 0:
+        max_features = np.concatenate([FEATURES_DICT[label] for label in data_labels])
+        master_df = master_df.dropna(subset=max_features).reset_index(drop=True)
 
     # Make one split for all experiments
-    idx_train = reduced_df['is_test'] == False
-    idx_test = reduced_df['is_test'] == True
-    df_train = reduced_df.loc[idx_train]
-    df_test = reduced_df.loc[idx_test]
-    sdss_train = reduced_sdss.loc[idx_train]
-    sdss_test = reduced_sdss.loc[idx_test]
-    y_train = sdss_train['CLASS']
-    y_test = sdss_test['CLASS']
+    df_train = master_df.loc[master_df['train_split'] == 'train']
+    df_test = master_df.loc[master_df['train_split'] == 'test']
+    y_train = df_train['CLASS']
 
     # Add things which are common to all feature set experiments
-    results = pd.DataFrame()
-    results['y_true'] = y_test.to_numpy()
-    results['redshift'] = sdss_test['Z'].to_numpy()
-    results['mag_median'] = df_test['median'].to_numpy()
-    for col in ([
-        'n_obs',  # 'n_obs_200',
-        'timespan',  # 'timespan_200',
-        'cadence_mean',  # 'cadence_mean_200',
-        'cadence_median',  # 'cadence_median_200',
-        'cadence_std',  # 'cadence_std_200'
-    ]):
-        results[col] = df_test[col].to_numpy()
+    # results = df_test[['CLASS', 'Z', 'mag median', 'mag err mean', 'n obs', 'timespan',
+    #              'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma']]
+    results = df_test[['CLASS', 'Z']]
 
     # Placeholder for classifiers
     classifiers = {}
@@ -90,7 +61,7 @@ def run_experiments(feature_labels, master_df, sdss_df, features_dict, filter=No
         X_test = df_test[features]
 
         # Make classification
-        clf = RandomForestClassifier(n_estimators=500, criterion='gini', random_state=491237, n_jobs=48, verbose=0)
+        clf = RandomForestClassifier(n_estimators=100, criterion='gini', random_state=491237, n_jobs=48, verbose=0)
         clf.fit(X_train, y_train)
         y_pred = clf.predict(X_test)
 
@@ -102,7 +73,51 @@ def run_experiments(feature_labels, master_df, sdss_df, features_dict, filter=No
     return results, classifiers
 
 
-def get_train_data(ztf_date='20210401', filter='g', data_subsets=None, return_features=True):
+def read_train_matrices(ztf_date, filter_name):
+    path = os.path.join(DATA_PATH, 'ZTF_x_SDSS/ZTF_20240117/matrices/ZTF_{}_filter_{}__{}_{}.pickle')
+    data = {'X': {}, 'y': {}}
+    for label_matrix in data:
+        for label_split in ['train', 'val', 'test']:
+            with open(path.format(ztf_date, filter_name, label_matrix, label_split), 'rb') as file:
+                data[label_matrix][label_split] = pickle.load(file)
+    return data['X']['train'], data['X']['val'], data['X']['test'], data['y']['train'], data['y']['val'], data['y']['test']
+
+
+def get_train_matrices(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False):
+    random.seed(1257)
+    if with_multiprocessing:
+        print('Building the X matrix')
+        with Pool(24) as p:
+            X = p.map(subsample_matrix_row, ztf_x_sdss)
+    else:
+        X = [subsample_matrix_row(lc_dict) for lc_dict in tqdm(ztf_x_sdss, 'Input matrix')]
+
+    class_dict = {
+        'GALAXY': 0,
+        'QSO': 1,
+        'STAR': 2,
+    }
+    y = sdss_x_ztf['CLASS'].apply(lambda x: class_dict[x]).to_list()
+
+    idx_train = np.where(sdss_x_ztf['train_split'] == 'train')[0]
+    idx_val = np.where(sdss_x_ztf['train_split'] == 'val')[0]
+    idx_test = np.where(sdss_x_ztf['train_split'] == 'test')[0]
+    X_train = [X[i] for i in idx_train]
+    X_val = [X[i] for i in idx_val]
+    X_test = [X[i] for i in idx_test]
+    y_train = [y[i] for i in idx_train]
+    y_val = [y[i] for i in idx_val]
+    y_test = [y[i] for i in idx_test]
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+
+def subsample_matrix_row(lc_dict):
+    idx = range(len(lc_dict['mjd'])) if len(lc_dict['mjd']) <= 200 else sorted(random.sample(range(len(lc_dict['mjd'])), 200))
+    return np.array([[lc_dict['mjd'][i], lc_dict['mag'][i], lc_dict['magerr'][i]] for i in idx])
+
+
+def get_train_data(ztf_date='20210401', filter='g', data_subsets=None, return_light_curves=True, return_features=False):
     if ztf_date == '20210401':
         paths = {
             'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_20210401/specObj-dr18_x_ztf_20210401__singles_filter_{}__features'.format(filter),
@@ -111,25 +126,37 @@ def get_train_data(ztf_date='20210401', filter='g', data_subsets=None, return_fe
         }
     else:
         paths = {
-            'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_{}/specObj-dr18_x_ztf_{}__singles__filter_{}__reduced'.format(ztf_date, ztf_date, filter),
-            'ztf_x_sdss_lc': 'ZTF_x_SDSS/ZTF_{}/ztf_{}_x_specObj-dr18__singles__filter_{}__reduced'.format(ztf_date, ztf_date, filter),
-            'ztf_x_sdss_features': None,
+            'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_{}/specObj-dr18_x_ztf_{}__longests_filter_{}__reduced'.format(ztf_date, ztf_date, filter),
+            'ztf_x_sdss_lc': 'ZTF_x_SDSS/ZTF_{}/ztf_{}_x_specObj-dr18__longests_filter_{}__reduced'.format(ztf_date, ztf_date, filter),
+            'sdss_pwg_x_ztf': 'ZTF_x_SDSS/ZTF_{}/specObj-dr18_PWG_x_ztf_{}__longests_filter_{}__reduced'.format(ztf_date, ztf_date, filter),
         }
-    
-    # Read ZTF x SDSS lightcurves with available features
-    with open(os.path.join(DATA_PATH, paths['ztf_x_sdss_lc']), 'rb') as file:
-        ztf_x_sdss_reduced = pickle.load(file)
 
-    # Read SDSS x ZTF subset with available features
+    # Read ZTF x SDSS lightcurves
+    if return_light_curves:
+        with open(os.path.join(DATA_PATH, paths['ztf_x_sdss_lc']), 'rb') as file:
+            ztf_x_sdss = pickle.load(file)
+    else:
+        ztf_x_sdss = None
+
+    # Read SDSS x ZTF subset
     with open(os.path.join(DATA_PATH, paths['sdss_x_ztf']), 'rb') as file:
-        sdss_x_ztf_features = pickle.load(file)
-    sdss_x_ztf_features = sdss_x_ztf_features.reset_index(drop=True)
+        sdss_x_ztf = pickle.load(file).reset_index(drop=True)
 
-    # Make always the same train test split on the data
-    idx_train, idx_test = train_test_split(sdss_x_ztf_features.index, test_size=0.33, random_state=42)
-    sdss_x_ztf_features.loc[idx_test, 'is_test'] = True
-    sdss_x_ztf_features.loc[idx_train, 'is_test'] = False
+    # Read PWG features
+    with open(os.path.join(DATA_PATH, paths['sdss_pwg_x_ztf']), 'rb') as file:
+        sdss_pwg_x_ztf = pickle.load(file).reset_index(drop=True)
 
+    # Concat SDSS with the features
+    sdss_x_ztf = pd.concat([sdss_x_ztf, sdss_pwg_x_ztf], axis=1)
+
+    # Make always the same train test split
+    idx_train, idx_test = train_test_split(sdss_x_ztf.index, test_size=0.15, random_state=42)
+    idx_train, idx_val = train_test_split(idx_train, test_size=0.15, random_state=42)
+    
+    sdss_x_ztf.loc[idx_train, 'train_split'] = 'train'
+    sdss_x_ztf.loc[idx_val, 'train_split'] = 'val'
+    sdss_x_ztf.loc[idx_test, 'train_split'] = 'test'
+    
     # Take a subset with features
     if ztf_date == '20210401' and return_features:
         # Read ZTF x SDSS subset with available features
@@ -142,12 +169,13 @@ def get_train_data(ztf_date='20210401', filter='g', data_subsets=None, return_fe
             ztf_x_sdss_features = ztf_x_sdss_features.dropna(subset=features_list)
             indices = ztf_x_sdss_features.index
             ztf_x_sdss_features = ztf_x_sdss_features.reset_index(drop=True)
-            ztf_x_sdss_reduced = np.array(ztf_x_sdss_reduced)[indices.tolist()]
-            sdss_x_ztf_features = sdss_x_ztf_features.loc[indices].reset_index(drop=True)
+            ztf_x_sdss = np.array(ztf_x_sdss)[indices.tolist()]
+            sdss_x_ztf = sdss_x_ztf.loc[indices].reset_index(drop=True)
 
-        return ztf_x_sdss_reduced, sdss_x_ztf_features, ztf_x_sdss_features
+        return ztf_x_sdss, sdss_x_ztf, ztf_x_sdss_features
+
     else:
-        return ztf_x_sdss_reduced, sdss_x_ztf_features
+        return ztf_x_sdss, sdss_x_ztf
 
 
 def get_embedding(data, perplexity=30.0, n_iter=5000):
