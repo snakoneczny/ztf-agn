@@ -31,7 +31,7 @@ fields = [k for k in fields_dict if fields_dict[k] > 0]
 # fields = [k for k in fields if k in test_fields]
 
 # Get a chunk of fields
-fields = fields[:500]
+fields = fields[500:]
 
 # Scan for files
 to_process, n_obj = [], []
@@ -80,16 +80,16 @@ with tqdm('Downloading data', total=all_data) as pbar:
             df = pd.DataFrame(data, columns=['id', 'ra', 'dec', 'n obs'])
             df['n obs'] = [len(lc_dict['mjd']) for lc_dict in data]
             data = [np.array([lc_dict['mjd'], lc_dict['mag'], lc_dict['magerr']]) for lc_dict in data]
+            kowalski.close()
             gc.collect()
 
             # Save both
             save_fits(df, output_file_name + '.fits', overwrite=True, with_print=False)
             with lzma.open(output_file_name + '.xz', 'wb') as f:
                 pickle.dump(data, f)
+            gc.collect()
 
             # Update the progress
             pbar.update(n_obj[i])
             print('Original IDs: {}, light curves: {}, saved to: {}'.format(
                 len(ids), len(data), output_file_name))
-
-            kowalski.close()

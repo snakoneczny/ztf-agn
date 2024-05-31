@@ -9,7 +9,7 @@ from penquins import Kowalski
 sys.path.append('..')
 from env_config import DATA_PATH
 from credentials import KOWALSKI_USERNAME, KOWALSKI_PASSWORD
-from ztf import ZTF_FILTER_NAMES, ZTF_DATES, get_ztf_field_ids
+from ztf import ZTF_FILTER_NAMES, ZTF_DATES, get_catalog_data
 
 
 date = ZTF_DATES['DR 20']
@@ -32,8 +32,9 @@ for filter in [1]:
                 host='melman.caltech.edu',
                 timeout=99999999,
             )
-
-            data = get_ztf_field_ids(field, date, kowalski, filter=filter, verbose=0)
+            
+            catalog = 'ZTF_sources_{}'.format(date)
+            data = get_catalog_data(catalog, kowalski, field_id=field, filter=filter, verbose=0)
             print('Filter {}, field {}: {}'.format(filter_name, field, len(data)))
 
             if len(data) > 0:

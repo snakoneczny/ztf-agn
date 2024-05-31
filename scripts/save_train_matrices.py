@@ -6,13 +6,12 @@ import gc
 sys.path.append('..')
 from env_config import DATA_PATH
 from ztf import ZTF_DATES
-from ml import get_train_data, get_train_matrices
+from ml import get_train_data, make_train_test_split
 
 
 ztf_date = ZTF_DATES['DR 20']
 
 for filter_name in ['g', 'r']:
-
     # Read the train data
     data_subsets = ['ZTF']
     ztf_x_sdss, sdss_x_ztf = \
@@ -21,7 +20,7 @@ for filter_name in ['g', 'r']:
     # Change shape to feed a neural network and sample random 200 observations
     data = {'X': {}, 'y': {}}
     data['X']['train'], data['X']['val'], data['X']['test'], data['y']['train'], data['y']['val'], data['y']['test'] = \
-        get_train_matrices(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False)
+        make_train_test_split(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False)
     gc.collect()
 
     # Save

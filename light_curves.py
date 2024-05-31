@@ -79,7 +79,7 @@ def preprocess_ztf_light_curves(data, data_sdss=None, data_features=None, min_n_
 
     # Get at least 21 observations
     n_obs = [len(lc_dict['mjd']) for lc_dict in data]
-    idx = np.array(n_obs) > min_n_obs
+    idx = np.array(n_obs) >= min_n_obs
     data = np.array(data)[np.where(idx)]
     if data_sdss is not None:
         data_sdss = data_sdss.loc[idx].reset_index(drop=True)
@@ -97,13 +97,13 @@ def preprocess_ztf_light_curves(data, data_sdss=None, data_features=None, min_n_
 
     # Get at least 21 observations after the deep drilling
     n_obs = [len(lc_dict['mjd']) for lc_dict in data]
-    idx = np.array(n_obs) > min_n_obs
+    idx = np.array(n_obs) >= min_n_obs
     data = np.array(data)[np.where(idx)]
     if data_sdss is not None:
         data_sdss = data_sdss.loc[idx].reset_index(drop=True)
     if data_features is not None:
         data_features = data_features.loc[idx].reset_index(drop=True)
-    print('Deep drilling and n_obs > 20: {} ({:.2f}%)'.format(len(data), len(data) / original_size * 100))
+    print('Deep drilling and n_obs >= 20: {} ({:.2f}%)'.format(len(data), len(data) / original_size * 100))
     gc.collect()
 
     if data_sdss is not None and data_features is not None:

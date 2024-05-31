@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 from pathlib import Path
+import gc
 
 import numpy as np
 import pandas as pd
@@ -12,8 +13,7 @@ from sklearn.metrics import accuracy_score, f1_score
 
 sys.path.append('..')
 from env_config import PROJECT_PATH
-from ml import get_train_data, get_train_matrices, read_train_matrices
-from light_curves import subsample_light_curves
+from ml import get_train_matrices, read_train_matrices
 from astromer import build_model
 from ztf import ZTF_DATES
 
@@ -49,7 +49,7 @@ early_stopping = {
 minimum_timespan = {
     '20210401': 1000,
     '20230821': 1800,
-    '20240117': 2100,
+    '20240117': 1800,
 }
 
 # Test params
@@ -62,37 +62,25 @@ if args.tag:
     experiment_name += '__{}'.format(args.tag)
 
 if args.timespan:
-    # Read the train data
-    ztf_x_sdss, sdss_x_ztf = \
-        get_train_data(ztf_date=ztf_date, filter=args.filter, data_subsets=['ZTF'], return_features=False)
-
-    # Limit data size for testing
-    if args.is_test:
-        ztf_x_sdss = ztf_x_sdss[:test_size]
-        sdss_x_ztf = sdss_x_ztf.head(test_size)
-
-    # Make a sampling experiment
-    if args.timespan:
-        ztf_x_sdss, sdss_x_ztf, n_obs_subsampled = subsample_light_curves(
-            ztf_x_sdss, sdss_x_ztf, minimum_timespan=minimum_timespan[ztf_date],
-            timespan=args.timespan, frac_n_obs=args.frac_n_obs)
-
-        # Add a tag to the experiment name
-        experiment_name += '__timespan={}_p-nobs={}_nobs={}'.format(
-            args.timespan, int(args.frac_n_obs * 100), n_obs_subsampled)
-
-    # Change shape to feed a neural network and sample random 200 observations
-    X_train, X_val, X_test, y_train, y_val, y_test = get_train_matrices(ztf_x_sdss, sdss_x_ztf)
+    # Read data and subsample light curves according to the input parameters
+    X_train, X_val, X_test, y_train, y_val, y_test, n_obs_subsampled = get_train_matrices(
+        ztf_date, args.filter, minimum_timespan=minimum_timespan[ztf_date],
+        timespan=args.timespan, frac_n_obs=args.frac_n_obs,
+    )
+    
+    # Add a tag to the experiment name
+    experiment_name += '__timespan={}_p-nobs={}_nobs={}'.format(
+        args.timespan, int(args.frac_n_obs * 100), n_obs_subsampled)
 
 else:
     # Read the already saved matrices
     X_train, X_val, X_test, y_train, y_val, y_test = read_train_matrices(ztf_date, args.filter)
 
-    # Limit data size for testing
-    if args.is_test:
-        X_train, X_val, X_test, y_train, y_val, y_test = \
-            X_train[:test_size], X_val[:test_size], X_test[:test_size], \
-            y_train[:test_size], y_val[:test_size], y_test[:test_size]
+# Limit data size for testing
+if args.is_test:
+    X_train, X_val, X_test, y_train, y_val, y_test = \
+        X_train[:test_size], X_val[:test_size], X_test[:test_size], \
+        y_train[:test_size], y_val[:test_size], y_test[:test_size]
 
 # Shuffle the training data and keep the shuffling index
 np.random.seed(546)
@@ -100,6 +88,9 @@ index_rnd = np.random.permutation(len(X_train))
 index_org = np.argsort(index_rnd)
 X_train = [X_train[i] for i in index_rnd]
 y_train = [y_train[i] for i in index_rnd]
+
+# Collect any data left from the data processing
+gc.collect()
 
 # Make batches
 batches_dict = {}

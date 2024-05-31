@@ -5,6 +5,7 @@ from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
+import json
 from tqdm.autonotebook import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
@@ -13,6 +14,7 @@ from sklearn.manifold import TSNE
 
 from env_config import DATA_PATH, PROJECT_PATH
 from features import FEATURES_DICT
+from light_curves import subsample_light_curves
 
 
 def run_experiments(feature_labels, master_df, features_dict, filter, ztf_date):
@@ -46,9 +48,8 @@ def run_experiments(feature_labels, master_df, features_dict, filter, ztf_date):
     y_train = df_train['CLASS']
 
     # Add things which are common to all feature set experiments
-    # results = df_test[['CLASS', 'Z', 'mag median', 'mag err mean', 'n obs', 'timespan',
-    #              'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma']]
-    results = df_test[['CLASS', 'Z']]
+    results = df_test[['CLASS', 'Z', 'mag median', 'mag err mean', 'n obs', 'timespan',
+                 'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma']]
 
     # Placeholder for classifiers
     classifiers = {}
@@ -61,7 +62,7 @@ def run_experiments(feature_labels, master_df, features_dict, filter, ztf_date):
         X_test = df_test[features]
 
         # Make classification
-        clf = RandomForestClassifier(n_estimators=100, criterion='gini', random_state=491237, n_jobs=48, verbose=0)
+        clf = RandomForestClassifier(n_estimators=200, criterion='gini', random_state=491237, n_jobs=24, verbose=0)
         clf.fit(X_train, y_train)
         y_pred = clf.predict(X_test)
 
@@ -71,6 +72,48 @@ def run_experiments(feature_labels, master_df, features_dict, filter, ztf_date):
         classifiers[features_label] = clf
 
     return results, classifiers
+
+
+def load_results(data_compositions, ztf_date, filters):
+    # Resulting data structures
+    results_dict = {}
+    feature_importance_dict = {}
+
+    for filter in filters:
+        results_dict[filter] = {}
+        feature_importance_dict[filter] = {}
+
+        for data_composition in data_compositions:
+            data_label = '_'.join(data_composition)
+
+            # Read predictions
+            file_name = 'ZTF_{}_band_{}__{}__RF'.format(ztf_date, filter, data_label)
+            file_path = os.path.join(PROJECT_PATH, 'outputs/preds/ZTF_{}'.format(ztf_date), file_name + '__test.csv')
+            results_dict[filter][data_label] = pd.read_csv(file_path)
+            print('Loaded results: {}'.format(file_path))
+
+            # Read feature importances
+            file_path = os.path.join(PROJECT_PATH, 'outputs/feature_importance/ZTF_{}'.format(ztf_date), file_name + '.json')
+            with open(file_path) as file:
+                feature_importance_dict[filter][data_label] = json.load(file)
+            print('Loaded feature importances: {}'.format(file_path))
+
+            # Check if Astromer present and add as well
+            file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_{}__astromer_FC-1024-512-256'.format(ztf_date, ztf_date, filter, data_label)
+            file_name += '__test.csv'
+            file_path = os.path.join(PROJECT_PATH, file_name)
+            if os.path.exists(file_path):
+                df_preds = pd.read_csv(file_path)
+                prediction_label = 'y_pred Astrm'
+                results_dict[filter][data_label][prediction_label] = df_preds['y_pred']
+                print('Loaded Astromer: {}'.format(file_path))
+    
+    # TODO: Refactor
+    for filter in filters:
+        for key in results_dict[filter]:
+            results_dict[filter][key]['y_true'] = results_dict[filter][key]['CLASS']
+
+    return results_dict, feature_importance_dict
 
 
 def read_train_matrices(ztf_date, filter_name):
@@ -83,7 +126,28 @@ def read_train_matrices(ztf_date, filter_name):
     return data['X']['train'], data['X']['val'], data['X']['test'], data['y']['train'], data['y']['val'], data['y']['test']
 
 
-def get_train_matrices(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False):
+def get_train_matrices(ztf_date, filter, minimum_timespan=None, timespan=None, frac_n_obs=None):
+    # Read the train data
+    ztf_x_sdss, sdss_x_ztf = \
+        get_train_data(ztf_date=ztf_date, filter=filter, data_subsets=['ZTF'], return_features=False)
+
+    # Make a sampling experiment
+    n_obs_subsampled = None
+    if timespan:
+        ztf_x_sdss, sdss_x_ztf, n_obs_subsampled = subsample_light_curves(
+            ztf_x_sdss, sdss_x_ztf, minimum_timespan=minimum_timespan,
+            timespan=timespan, frac_n_obs=frac_n_obs)
+
+    # Change shape to feed a neural network and sample random 200 observations
+    X_train, X_val, X_test, y_train, y_val, y_test = make_train_test_split(ztf_x_sdss, sdss_x_ztf)
+
+    if timespan:
+        return X_train, X_val, X_test, y_train, y_val, y_test, n_obs_subsampled
+    else:
+        return X_train, X_val, X_test, y_train, y_val, y_test
+
+
+def make_train_test_split(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False):
     random.seed(1257)
     if with_multiprocessing:
         print('Building the X matrix')

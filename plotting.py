@@ -1,3 +1,6 @@
+import random
+
+import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import dates as mdates
 import seaborn as sns
@@ -34,6 +37,45 @@ def plot_embedding(data, feature_labels):
         idx = (labels == cls)
         sns.scatterplot(x=x.loc[idx], y=y.loc[idx], hue=data_subset['SUBCLASS'].loc[idx])
         plt.title(cls)
+
+
+def plot_light_curves(light_curves, stats):
+    stats = stats.reset_index(drop=True)
+
+    # Sample
+    idx_sample = random.sample(range(len(light_curves)), 8)
+
+    # Sort by redshift
+    redshifts = stats.loc[idx_sample, 'Z']
+    idx_sample = [i for _, i in sorted(zip(redshifts, idx_sample))]
+
+    # Plot lighcurves
+    size = 16
+    fig, axs = plt.subplots(4, 2, figsize=(size, size / 210 * 297))
+    axs = axs.flatten()
+
+    for i, (idx, ax) in enumerate(zip(idx_sample, axs)):
+        lc = light_curves[idx]
+        plot_light_curve(lc, ax)
+
+        # Add statistics
+        info = [
+            'redshift:  {:.1f}'.format(stats.loc[idx, 'Z']),
+            'observations:  {}'.format(np.around(stats.loc[idx, 'n obs'])),
+            'cadence:  ${:.1f}^{{+{:.1f}}}_{{-{:.1f}}}$ days'.format(
+                stats.loc[idx, 'cadence median'], stats.loc[idx, 'cadence plus sigma'], stats.loc[idx, 'cadence minus sigma']),
+        ]
+        info = '\n'.join(info)
+        text_plot = plt.text(.02, .97, info, ha='left', va='top', transform=ax.transAxes)
+        text_plot.set_bbox(dict(facecolor='white', alpha=0.8, edgecolor='grey'))
+
+        if i >= len(axs) - 2:
+            ax.set_xlabel('date')
+        if i % 2 == 0:
+            ax.set_ylabel('magnitude')
+
+        plt.subplots_adjust(left=0.1, bottom=0.1, right=0.9, top=0.9, wspace=0.1, hspace=0.1)
+    plt.show()
 
 
 def plot_light_curve(lc_dict, ax=None, alpha=None):

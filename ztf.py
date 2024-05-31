@@ -13,6 +13,12 @@ ZTF_FILTER_NAMES = {1: 'g', 2: 'r', 3: 'i'}
 
 TEST_FIELDS = [296, 297, 423, 424, 487, 488, 562, 563, 682, 683, 699, 700, 717, 718, 777, 778, 841, 842, 852, 853]
 
+LIMITING_MAGS = {
+    'g': 20.8,
+    'r': 20.6,
+    'i': 19.9,
+}
+
 ZTF_DATES = {
     'DR 5': '20210401',
     'DR 16': '20230821',
@@ -27,50 +33,60 @@ ZTF_LAST_DATES = {
 
 CATALOGS_DICT = {
     'ZTF': {
-        'projection': {
-            '_id': 1,
-            'filter': 1,
-            'data.ra': 1,
-            'data.dec': 1,
-            'data.catflags': 1,
-            'data.hjd': 1,
-            'data.mag': 1,
-            'data.magerr': 1,
-        }
+        '_id': 1,
+        'filter': 1,
+        'data.ra': 1,
+        'data.dec': 1,
+        'data.catflags': 1,
+        'data.hjd': 1,
+        'data.mag': 1,
+        'data.magerr': 1,
     },
     'PS1_DR1': {
-        'projection': {
-            '_id': 0,
-            'gMeanPSFMag': 1,
-            'rMeanPSFMag': 1,
-            'iMeanPSFMag': 1,
-            'zMeanPSFMag': 1,
-        }
+        '_id': 1,
+        'raMean': 1,
+        'decMean': 1,
+        'qualityFlag': 1,
+        'gMeanPSFMag': 1,
+        'rMeanPSFMag': 1,
+        'iMeanPSFMag': 1,
+        'zMeanPSFMag': 1,
+        'yMeanPSFMag': 1,
+        'gMeanPSFMagErr': 1,
+        'rMeanPSFMagErr': 1,
+        'iMeanPSFMagErr': 1,
+        'zMeanPSFMagErr': 1,
+        'yMeanPSFMagErr': 1,
     },
     'AllWISE': {
-        'projection': {
-            '_id': 0,
-            'w1mpro': 1,
-            'w2mpro': 1,
-            'w3mpro': 1,
-            'w4mpro': 1,
-        }
+        '_id': 1,
+        'ra': 1,
+        'dec': 1,
+        'ph_qual': 1,
+        'w1mpro': 1,
+        'w2mpro': 1,
+        'w3mpro': 1,
+        'w4mpro': 1,
+        'w1sigmpro': 1,
+        'w2sigmpro': 1,
+        'w3sigmpro': 1,
+        'w4sigmpro': 1,
     },
     'Gaia_EDR3': {
-        'projection': {
-            '_id': 0,
-            'phot_g_mean_mag': 1,
-            'phot_bp_mean_mag': 1,
-            'phot_rp_mean_mag': 1,
-            'phot_bp_rp_excess_factor': 1,
-            'astrometric_excess_noise': 1,
-            'parallax': 1,
-            'parallax_error': 1,
-            'pmra': 1,
-            'pmra_error': 1,
-            'pmdec': 1,
-            'pmdec_error': 1,
-        }
+        '_id': 1,
+        'ra': 1,
+        'dec': 1,
+        'phot_g_mean_mag': 1,
+        'phot_bp_mean_mag': 1,
+        'phot_rp_mean_mag': 1,
+        'phot_bp_rp_excess_factor': 1,
+        'astrometric_excess_noise': 1,
+        'parallax': 1,
+        'parallax_error': 1,
+        'pmra': 1,
+        'pmra_error': 1,
+        'pmdec': 1,
+        'pmdec_error': 1,
     },
 }
 
@@ -79,7 +95,7 @@ def get_ztf_light_curves(ids, date, kowalski):
     chunk_size = 10000
     n_threads = 10
     n_batch_queries = n_threads
-    
+
     # Make chunked queries
     queries = [get_light_curves_query(ids[i:i + chunk_size], date) for i in range(0, len(ids), chunk_size)]
     # Make batched queries
@@ -102,24 +118,42 @@ def get_ztf_light_curves(ids, date, kowalski):
     return to_return
 
 
-def get_ztf_field_ids(field_id, date, kowalski, filter=1, verbose=0):
-    limit = 20000
+# Return only IDs for a ZTF catalog, or all columns from the projection dict for other surveys
+def get_catalog_data(catalog, kowalski, chunk_start=None, chunk_end=None, field_id=None, filter=None, verbose=0):
+    limit = 10000
     n_threads = 10
-    n_batch_queries = n_threads
 
     to_return = []
     still_working = True
-    next_batch = 0
+    next_batch = 0 if chunk_start is None else chunk_start    
+    
     while still_working:
-        queries = [get_field_ids_query(field_id, date, limit, next_batch + j * limit, filter) for j in range(n_batch_queries)]
+        gc.collect()
+        
+        # Get responses
+        queries = [get_find_query(catalog, limit, next_batch + i * limit, field_id=field_id, filter=filter) for i in range(n_threads)]
         responses = kowalski.query(queries=queries, use_batch_query=True, max_n_threads=n_threads)
         
-        data_arr = [response.get('data') for response in responses.get('default')]
-        data = sorted([obj['_id'] for obj in np.concatenate(data_arr)])
+        # Concatenate
+        data_arr = [response.get('data') for response in responses['default']]
+        data_arr = [elem if elem is not None else [] for elem in data_arr]
+        data = np.concatenate(data_arr)
+        
+        # Sort
+        ids = [obj['_id'] for obj in data]
+        if field_id is not None:
+            data = sorted(ids)
+        else:
+            data = [x for _, x in sorted(zip(ids, data))]
 
+        # Add
         to_return.extend(data)
-        still_working = len(data_arr[-1]) > 0
-        next_batch += limit * n_batch_queries
+        
+        # Move next
+        next_batch += limit * n_threads
+        still_working = len(data) == limit * n_threads
+        if chunk_start is not None:
+            still_working &= next_batch < chunk_end
 
         if verbose:
             print('Processed: {}'.format(next_batch))
@@ -264,25 +298,29 @@ def get_light_curves_query(ids, date):
     return query
 
 
-def get_field_ids_query(field_id, date, limit, skip, filter):
+def get_find_query(catalog, limit, skip, field_id=None, filter=None):
     query = {
         'query_type': 'find',
         'query': {
-            'catalog': 'ZTF_sources_{}'.format(date),
-            'filter': {
-                'field': {'$eq': field_id},
-                'filter': {'$eq': filter},
-            },
+            'catalog': catalog,
+            'filter': {},
             'projection': {
                 '_id': 1,
             },
         },
         'kwargs': {
-            'max_time_ms': 60000,  # 1 minute
+            'max_time_ms': 600000,  # 10 minute
             'limit': limit,
             'skip': skip,
         },
     }
+    if catalog[:3] != 'ZTF':
+        query['query']['projection'] = CATALOGS_DICT[catalog]
+    if field_id is not None:
+        query['query']['filter'] = {
+            'field': {'$eq': field_id},
+            'filter': {'$eq': filter},
+        }
     return query
 
 
@@ -328,7 +366,7 @@ def get_near_query(ra, dec, radius, catalogs):
             'distance_units': 'arcsec',
             'radec': {'query_coords': [ra, dec]},
             'catalogs': {
-                catalog: CATALOGS_DICT[catalog] for catalog in catalogs
+                catalog: {'projection': CATALOGS_DICT[catalog]} for catalog in catalogs
             },
         },
         'kwargs': {
@@ -348,7 +386,9 @@ def get_cone_query(ra, dec, radius, ztf_date=None, catalogs=None):
                 'cone_search_unit': 'arcsec'
             },
             'catalogs': {
-                'ZTF_sources_{}'.format(ztf_date): CATALOGS_DICT['ZTF']
+                'ZTF_sources_{}'.format(ztf_date): {
+                    'projection': CATALOGS_DICT['ZTF']
+                }
             },
         }
     }

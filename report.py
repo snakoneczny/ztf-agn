@@ -2,24 +2,26 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, accuracy_score, f1_score
+from tqdm.autonotebook import tqdm
 
 from utils import pretty_print, pretty_print_features
+from plotting import plot_light_curves
 
 
 def print_summary_table(results_dict, labels=None, filters=None, concise=False):
     filters = ['g', 'r'] if not filters else filters
     data_labels = [label[0] for label in labels] if labels else list(results_dict[filters[0]].keys())
     feature_labels = [label[1] for label in labels] if labels else [None] * len(data_labels)
-    df = stack_summary_tables([get_summary_table(results_dict, data_labels[i], filters, feature_labels[i]) for i in range(len(data_labels))], filters)
+    df = stack_summary_tables([get_summary_table(results_dict, data_labels[i], filters, feature_labels[i]) for i in tqdm(range(len(data_labels)))], filters)
 
     if concise:
         new_column_order = ['data', 'features']
         for filter in filters:
             new_column_order.extend([
-                'QSO support (%) {}-band'.format(filter),
+                'accuracy {}-band'.format(filter),
                 'QSO f1 {}-band'.format(filter),
                 'QSO f1 global {}-band'.format(filter),
-                'accuracy {}-band'.format(filter),
+                'QSO support (%) {}-band'.format(filter),
             ])
         df = df[new_column_order]
 
@@ -52,7 +54,7 @@ def get_summary_table(results_dict, data_label, filters, feature_labels=None):
     if feature_labels is None:
         feature_labels = get_feature_labels(results_dict[filters[0]][data_label].columns)
 
-    for i, feature_label in enumerate(feature_labels):
+    for i, feature_label in list(enumerate(feature_labels)):
         new_row = {
             'data': data_label,
             'features': feature_label,
@@ -112,12 +114,8 @@ def make_report(results_df, feature_importances=None, label=None):
 
     # Plot results as functions of magnitude, redshift and number of observations
     x_to_run = [
-        'mag_median', 'redshift',
-        'n_obs', 'n_obs_200',
-        'timespan', 'timespan_200',
-        'cadence_mean', 'cadence_mean_200',
-        'cadence_median', 'cadence_median_200',
-        'cadence_std', 'cadence_std_200'
+        'mag median', 'mag err mean', 'Z', 'n obs', 'timespan',
+        'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma',
     ]
     for x in x_to_run:
         plot_results_as_function(results_df, x=x, labels=[y_pred_column], with_accuracy=True)
@@ -128,18 +126,36 @@ def make_report(results_df, feature_importances=None, label=None):
                              n_features=15, n_top_offsets=1)
 
 
+def plot_cls_light_curves(results_df, light_curves):
+    results_df = results_df.reset_index(drop=True)
+    
+    for cls_true, cls_pred in [
+        ('QSO', 'QSO'),
+        ('GALAXY', 'GALAXY'),
+        ('STAR', 'STAR'),
+        ('QSO', 'GALAXY'),
+        ('QSO', 'STAR'),
+        ('GALAXY', 'QSO'),
+        ('STAR', 'QSO'),
+    ]:
+        results_subset = results_df.loc[(results_df['y_true'] == cls_true) & (results_df['y_pred Astrm'] == cls_pred)]
+        lc_subset = light_curves[results_subset.index]
+        print('Class true {}\tclass pred {}'.format(cls_true, cls_pred))
+        plot_light_curves(lc_subset, results_subset)
+
+
 def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     plt.figure()
 
     # Make bins and get number of quasars in bins
     min, max = results_df[x].min(), results_df[x].max()
-    n_bins = 20
+    n_bins = 40
     bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x in ['n_obs', 'n_obs_200'] else np.linspace(min, max, n_bins)
     mid_points = np.array([(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)])
     results_df['bin'] = pd.cut(results_df[x], bins, include_lowest=True)
     groups = results_df.groupby('bin')
     n_qso = groups.apply(lambda x: x.loc[x['y_true'] == 'QSO'].shape[0])
-
+    
     # Make mask based on number of quasars
     mask = n_qso >= 10
     mid_points = mid_points[mask]
@@ -147,7 +163,8 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     min, max = 1, 0
     for y_pred_column in labels:
         acc = groups.apply(lambda x: accuracy_score(x['y_true'], x[y_pred_column]))
-        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None)[1])
+        qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None, labels=['GALAXY', 'QSO', 'STAR'],
+                                                 zero_division=np.nan)[1])
 
         # Plot only bins with enough number of QSOs
         acc, qso_f1 = acc[mask], qso_f1[mask]
