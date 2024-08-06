@@ -8,10 +8,10 @@ logger = logging.getLogger(__name__)
 
 def pretty_print(x):
     pretty_dict = {
-        'n_obs': 'number of observation epochs',
-        'n_obs_200': 'number of observation epochs (200)',
-        'mag_median': 'median magnitude',
-        'mean_cadence': 'mean cadence',
+        'Z': 'redshift',
+        'n obs': 'number of observation epochs',
+        'mag median': 'median magnitude',
+        'mean cadence': 'mean cadence',
     }
     if x in pretty_dict:
         x = pretty_dict[x]    
@@ -22,7 +22,8 @@ def pretty_print(x):
 
 def pretty_print_features(x):
     pretty_dict = {
-        'ZTF': 'precomputed',
+        'ZTF + AstrmClf': 'ZTF',
+        'ZTF + AstrmClf + PS': 'ZTF + PS',
         'Astrm': 'Astromer',
         'PS': 'Pan-STARRS',
     }

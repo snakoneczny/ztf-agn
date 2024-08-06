@@ -1,8 +1,8 @@
 import sys
 import os
 import gc
+from datetime import datetime
 
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from penquins import Kowalski
@@ -14,7 +14,11 @@ from ztf import CATALOGS_DICT, get_catalog_data
 from utils import save_fits
 
 
-catalogs = ['Gaia_EDR3']
+catalogs = [
+    # 'PS1_DR1',
+    # 'AllWISE',
+    'Gaia_EDR3',
+]
 chunk_size = 1e6
 
 for catalog in tqdm(catalogs):
@@ -24,7 +28,7 @@ for catalog in tqdm(catalogs):
     while keep_going:
         chunk_start, chunk_end = int(i * chunk_size), int((i + 1) * chunk_size)
         print('Processing {} - {}'.format(chunk_start, chunk_end))
-        
+
         file_name = '{}/chunks/{}__{}_{}.fits'.format(catalog, catalog, chunk_start, chunk_end)
         file_name = os.path.join(DATA_PATH, file_name)
 
@@ -35,24 +39,23 @@ for catalog in tqdm(catalogs):
                 host='melman.caltech.edu',
                 timeout=99999999,
             )
-            
+
+            # Download data and measure time
+            start = datetime.now()
             data = get_catalog_data(
-                catalog, kowalski, chunk_start=chunk_start, chunk_end=chunk_end
+                catalog, kowalski, chunk_start=chunk_start, chunk_end=chunk_end, verbose=0,
             )
+            delta = datetime.now() - start
+            print('Time taken: {}'.format(delta))
+            print('Data downloaded {}'.format(len(data)))
+
             kowalski.close()
             gc.collect()
-            print('Downloaded data {}'.format(len(data)))
 
             if len(data) > 0:
                 df = pd.DataFrame.from_records(data, columns=CATALOGS_DICT[catalog])
                 save_fits(df, file_name, overwrite=True, with_print=True)
-                
-                # data = [elem['_id'] for elem in data]
-                # with open(file_name, 'wb') as file:
-                #     np.save(file, data)
-
                 gc.collect()
-            else:
-                keep_going = False
-        
+
+            keep_going = (len(data) == chunk_size)       
         i += 1

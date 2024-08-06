@@ -60,10 +60,14 @@ def plot_light_curves(light_curves, stats):
 
         # Add statistics
         info = [
-            'redshift:  {:.1f}'.format(stats.loc[idx, 'Z']),
-            'observations:  {}'.format(np.around(stats.loc[idx, 'n obs'])),
-            'cadence:  ${:.1f}^{{+{:.1f}}}_{{-{:.1f}}}$ days'.format(
-                stats.loc[idx, 'cadence median'], stats.loc[idx, 'cadence plus sigma'], stats.loc[idx, 'cadence minus sigma']),
+            'class: {}'.format(stats.loc[idx, 'y_true']),
+            'redshift: {:.1f}'.format(stats.loc[idx, 'Z']),
+            'galaxy: {:.1f}%'.format(stats.loc[idx, 'y_galaxy ZTF + AstrmClf'] * 100),
+            'quasar: {:.1f}%'.format(stats.loc[idx, 'y_qso ZTF + AstrmClf'] * 100),
+            'star: {:.1f}%'.format(stats.loc[idx, 'y_star ZTF + AstrmClf'] * 100),
+            # 'observations:  {}'.format(np.around(stats.loc[idx, 'n obs'])),
+            # 'cadence:  ${:.1f}^{{+{:.1f}}}_{{-{:.1f}}}$ days'.format(
+            #     stats.loc[idx, 'cadence median'], stats.loc[idx, 'cadence plus sigma'], stats.loc[idx, 'cadence minus sigma']),
         ]
         info = '\n'.join(info)
         text_plot = plt.text(.02, .97, info, ha='left', va='top', transform=ax.transAxes)

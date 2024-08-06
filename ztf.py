@@ -17,6 +17,13 @@ LIMITING_MAGS = {
     'g': 20.8,
     'r': 20.6,
     'i': 19.9,
+    'PS1_DR1__gMeanPSFMag': 22.0,
+    'PS1_DR1__rMeanPSFMag': 21.8,
+    'PS1_DR1__iMeanPSFMag': 21.5,
+    'PS1_DR1__zMeanPSFMag': 20.9,
+    'AllWISE__w1mpro': 17.1,
+    'AllWISE__w2mpro': 15.7,
+    'Gaia_EDR3__phot_g_mean_mag': 21,
 }
 
 ZTF_DATES = {
@@ -115,12 +122,17 @@ def get_ztf_light_curves(ids, date, kowalski):
         to_return.extend(data)
         gc.collect()
 
-    return to_return
+    # Extract DF and array        
+    df = pd.DataFrame(to_return, columns=['id', 'ra', 'dec', 'n obs'])
+    df['n obs'] = [len(lc_dict['mjd']) for lc_dict in to_return]
+    to_return = [np.array([lc_dict['mjd'], lc_dict['mag'], lc_dict['magerr']]) for lc_dict in to_return]
+    
+    return df, to_return
 
 
 # Return only IDs for a ZTF catalog, or all columns from the projection dict for other surveys
 def get_catalog_data(catalog, kowalski, chunk_start=None, chunk_end=None, field_id=None, filter=None, verbose=0):
-    limit = 10000
+    limit = 100000
     n_threads = 10
 
     to_return = []
@@ -151,9 +163,9 @@ def get_catalog_data(catalog, kowalski, chunk_start=None, chunk_end=None, field_
         
         # Move next
         next_batch += limit * n_threads
-        still_working = len(data) == limit * n_threads
+        still_working = (len(data) == limit * n_threads)
         if chunk_start is not None:
-            still_working &= next_batch < chunk_end
+            still_working &= (next_batch < chunk_end)
 
         if verbose:
             print('Processed: {}'.format(next_batch))
@@ -292,7 +304,7 @@ def get_light_curves_query(ids, date):
             },
         },
         'kwargs': {
-            'max_time_ms': 5 * 60 * 1000,  # 5 minute
+            'max_time_ms': 5 * 60000,  # 5 minutes
         },
     }
     return query
@@ -309,7 +321,7 @@ def get_find_query(catalog, limit, skip, field_id=None, filter=None):
             },
         },
         'kwargs': {
-            'max_time_ms': 600000,  # 10 minute
+            'max_time_ms': 2 * 60 * 60000,  # 2 hours
             'limit': limit,
             'skip': skip,
         },

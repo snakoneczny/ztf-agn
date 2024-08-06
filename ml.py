@@ -7,8 +7,9 @@ import numpy as np
 import pandas as pd
 import json
 from tqdm.autonotebook import tqdm
+from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
 
@@ -17,58 +18,77 @@ from features import FEATURES_DICT
 from light_curves import subsample_light_curves
 
 
-def run_experiments(feature_labels, master_df, features_dict, filter, ztf_date):
-    data_labels = [label for label in feature_labels if label != 'AstrmClf']
+FILE_NAMES = {
+    'preds': 'outputs/preds/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB_test.csv',
+    'features': 'outputs/feature_importance/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB.json',
+    'model': 'outputs/models/ZTF_{}/XGB__ZTF_{}_band_{}__features_{}.pickle',
+}
 
-    # Define experiments concatenating all features
-    to_process = [feature_labels]
-    # And single feature sets if comparing only two surveys
-    if len(feature_labels) == 2:
-        to_process = [[feature_label] for feature_label in feature_labels] + to_process
-
+def run_experiments(data_labels, feature_labels, master_df, features_dict, filter, ztf_date):
     # Add Astromer as features
-    if 'AstrmClf' in feature_labels:
+    if 'ZTF' in data_labels:
         for split_label in ['train', 'val', 'test']:
             file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_ZTF__astromer_FC-1024-512-256__{}.csv'.format(
                 ztf_date, ztf_date, filter, split_label)
             file_path = os.path.join(PROJECT_PATH, file_name)
             if os.path.exists(file_path):
                 df_preds = pd.read_csv(file_path)
-                for class_label in ['GALAXY', 'QSO', 'STAR']:                
+                for class_label in ['GALAXY', 'QSO', 'STAR']:
                     master_df.loc[master_df['train_split'] == split_label, 'astrm_{}'.format(class_label.lower())] = df_preds[class_label].to_list()
     
-    # Take all features together to reduce the input data frame
-    if len(data_labels) > 0:
-        max_features = np.concatenate([FEATURES_DICT[label] for label in data_labels])
-        master_df = master_df.dropna(subset=max_features).reset_index(drop=True)
+    # Take all data together to reduce the input data frame
+    data_features = np.concatenate([FEATURES_DICT[label] for label in data_labels])
+    master_df = master_df.dropna(subset=data_features).reset_index(drop=True)
 
     # Make one split for all experiments
-    df_train = master_df.loc[master_df['train_split'] == 'train']
-    df_test = master_df.loc[master_df['train_split'] == 'test']
-    y_train = df_train['CLASS']
+    df_dict, y_dict, y_encoded_dict = {}, {}, {}
+    split_labels = ['train', 'val', 'test']
+    cls_dict = {'GALAXY': 0, 'QSO': 1, 'STAR': 2}
+    for label in split_labels:
+        df_dict[label] = master_df.loc[master_df['train_split'] == label]
+        y_dict[label] = df_dict[label]['CLASS']
+        y_encoded_dict[label] = [cls_dict[x] for x in y_dict[label]]
 
     # Add things which are common to all feature set experiments
-    results = df_test[['CLASS', 'Z', 'mag median', 'mag err mean', 'n obs', 'timespan',
-                 'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma']]
+    results = df_dict['test'][[
+        'CLASS', 'Z', 'mag median', 'mag err mean', 'n obs', 'timespan',
+        'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma',
+        'PS1_DR1__gMeanPSFMag', 'PS1_DR1__rMeanPSFMag', 'PS1_DR1__iMeanPSFMag', 'PS1_DR1__zMeanPSFMag',
+        'AllWISE__w1mpro', 'AllWISE__w2mpro', 'Gaia_EDR3__phot_g_mean_mag'
+    ]]
 
     # Placeholder for classifiers
     classifiers = {}
 
     # Iterate over feature sets
-    for feature_sets in tqdm(to_process):
+    for feature_sets in tqdm(feature_labels):
         # Extract features
         features = np.concatenate([features_dict[feature_set] for feature_set in feature_sets])
-        X_train = df_train[features]
-        X_test = df_test[features]
+        X_dict = {}
+        for label in split_labels:
+            X_dict[label] = df_dict[label][features].values
+
+        # Train a model
+        clf = XGBClassifier(
+            max_depth=9, learning_rate=0.1, gamma=0, min_child_weight=1, colsample_bytree=0.9, subsample=0.8,
+            scale_pos_weight=2, reg_alpha=0, reg_lambda=1, n_estimators=100000, objective='multi:softmax',
+            booster='gbtree', max_delta_step=0, colsample_bylevel=1, base_score=0.5, random_state=18235, missing=np.nan,
+            verbosity=0, n_jobs=36, early_stopping_rounds=20,
+        )
+        clf.fit(X_dict['train'], y_encoded_dict['train'], eval_set=[(X_dict['val'], y_encoded_dict['val'])])
 
         # Make classification
-        clf = RandomForestClassifier(n_estimators=200, criterion='gini', random_state=491237, n_jobs=24, verbose=0)
-        clf.fit(X_train, y_train)
-        y_pred = clf.predict(X_test)
+        y_pred_proba = clf.predict_proba(X_dict['test'])
+        y_pred_cls = np.argmax(y_pred_proba, axis=1)
+        cls_dict = {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
+        y_pred_cls = [cls_dict[x] for x in y_pred_cls]
 
         # Save results
         features_label = ' + '.join(feature_sets)
-        results['y_pred {}'.format(features_label)] = y_pred
+        results['y_pred {}'.format(features_label)] = y_pred_cls
+        results['y_galaxy {}'.format(features_label)] = y_pred_proba[:, 0]
+        results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
+        results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
         classifiers[features_label] = clf
 
     return results, classifiers
@@ -87,27 +107,27 @@ def load_results(data_compositions, ztf_date, filters):
             data_label = '_'.join(data_composition)
 
             # Read predictions
-            file_name = 'ZTF_{}_band_{}__{}__RF'.format(ztf_date, filter, data_label)
-            file_path = os.path.join(PROJECT_PATH, 'outputs/preds/ZTF_{}'.format(ztf_date), file_name + '__test.csv')
+            file_name = FILE_NAMES['preds'].format(ztf_date, ztf_date, filter, data_label)
+            file_path = os.path.join(PROJECT_PATH, file_name)
             results_dict[filter][data_label] = pd.read_csv(file_path)
             print('Loaded results: {}'.format(file_path))
 
             # Read feature importances
-            file_path = os.path.join(PROJECT_PATH, 'outputs/feature_importance/ZTF_{}'.format(ztf_date), file_name + '.json')
+            file_name = FILE_NAMES['features'].format(ztf_date, ztf_date, filter, data_label)
+            file_path = os.path.join(PROJECT_PATH, file_name)
             with open(file_path) as file:
                 feature_importance_dict[filter][data_label] = json.load(file)
             print('Loaded feature importances: {}'.format(file_path))
 
             # Check if Astromer present and add as well
-            file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_{}__astromer_FC-1024-512-256'.format(ztf_date, ztf_date, filter, data_label)
-            file_name += '__test.csv'
+            file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_{}__astromer_FC-1024-512-256__test.csv'.format(ztf_date, ztf_date, filter, data_label)
             file_path = os.path.join(PROJECT_PATH, file_name)
             if os.path.exists(file_path):
                 df_preds = pd.read_csv(file_path)
                 prediction_label = 'y_pred Astrm'
                 results_dict[filter][data_label][prediction_label] = df_preds['y_pred']
                 print('Loaded Astromer: {}'.format(file_path))
-    
+
     # TODO: Refactor
     for filter in filters:
         for key in results_dict[filter]:
@@ -188,6 +208,11 @@ def get_train_data(ztf_date='20210401', filter='g', data_subsets=None, return_li
             'ztf_x_sdss_lc': 'ZTF_x_SDSS/ZTF_20210401/ztf_20210401_x_specObj-dr18__singles_filter_{}__features_lc-reduced'.format(filter),
             'ztf_x_sdss_features': 'ZTF_x_SDSS/ZTF_20210401/ztf_20210401_x_specObj-dr18__singles_filter_{}__features'.format(filter),
         }
+    elif ztf_date == '20230821':
+        paths = {
+            'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_{}/specObj-dr18_x_ztf_{}__singles__filter_{}__reduced'.format(ztf_date, ztf_date, filter),
+            'ztf_x_sdss_lc': 'ZTF_x_SDSS/ZTF_{}/ztf_{}_x_specObj-dr18__singles__filter_{}__reduced'.format(ztf_date, ztf_date, filter),
+        }
     else:
         paths = {
             'sdss_x_ztf': 'ZTF_x_SDSS/ZTF_{}/specObj-dr18_x_ztf_{}__longests_filter_{}__reduced'.format(ztf_date, ztf_date, filter),
@@ -207,11 +232,12 @@ def get_train_data(ztf_date='20210401', filter='g', data_subsets=None, return_li
         sdss_x_ztf = pickle.load(file).reset_index(drop=True)
 
     # Read PWG features
-    with open(os.path.join(DATA_PATH, paths['sdss_pwg_x_ztf']), 'rb') as file:
-        sdss_pwg_x_ztf = pickle.load(file).reset_index(drop=True)
+    if 'sdss_pwg_x_ztf' in paths:
+        with open(os.path.join(DATA_PATH, paths['sdss_pwg_x_ztf']), 'rb') as file:
+            sdss_pwg_x_ztf = pickle.load(file).reset_index(drop=True)
 
-    # Concat SDSS with the features
-    sdss_x_ztf = pd.concat([sdss_x_ztf, sdss_pwg_x_ztf], axis=1)
+        # Concat SDSS with the features
+        sdss_x_ztf = pd.concat([sdss_x_ztf, sdss_pwg_x_ztf], axis=1)
 
     # Make always the same train test split
     idx_train, idx_test = train_test_split(sdss_x_ztf.index, test_size=0.15, random_state=42)

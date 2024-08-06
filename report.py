@@ -18,10 +18,10 @@ def print_summary_table(results_dict, labels=None, filters=None, concise=False):
         new_column_order = ['data', 'features']
         for filter in filters:
             new_column_order.extend([
-                'accuracy {}-band'.format(filter),
-                'QSO f1 {}-band'.format(filter),
-                'QSO f1 global {}-band'.format(filter),
                 'QSO support (%) {}-band'.format(filter),
+                'QSO f1 global {}-band'.format(filter),
+                'QSO f1 {}-band'.format(filter),
+                'accuracy {}-band'.format(filter),
             ])
         df = df[new_column_order]
 
@@ -113,12 +113,12 @@ def make_report(results_df, feature_importances=None, label=None):
     plot_confusion_matrix(y_test, y_pred, ['GALAXY', 'QSO', 'STAR'])
 
     # Plot results as functions of magnitude, redshift and number of observations
-    x_to_run = [
-        'mag median', 'mag err mean', 'Z', 'n obs', 'timespan',
-        'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma',
-    ]
-    for x in x_to_run:
-        plot_results_as_function(results_df, x=x, labels=[y_pred_column], with_accuracy=True)
+    # x_to_run = [
+    #     'mag median', 'mag err mean', 'Z', 'n obs', 'timespan',
+    #     'cadence mean', 'cadence median', 'cadence plus sigma', 'cadence minus sigma',
+    # ]
+    # for x in x_to_run:
+    #     plot_results_as_function(results_df, x=x, labels=[y_pred_column], with_accuracy=True)
 
     # Feature importance
     if feature_importances is not None:
@@ -133,12 +133,14 @@ def plot_cls_light_curves(results_df, light_curves):
         ('QSO', 'QSO'),
         ('GALAXY', 'GALAXY'),
         ('STAR', 'STAR'),
-        ('QSO', 'GALAXY'),
         ('QSO', 'STAR'),
-        ('GALAXY', 'QSO'),
         ('STAR', 'QSO'),
+        ('QSO', 'GALAXY'),
+        ('GALAXY', 'QSO'),
+        ('GALAXY', 'STAR'),
+        ('STAR', 'GALAXY'),
     ]:
-        results_subset = results_df.loc[(results_df['y_true'] == cls_true) & (results_df['y_pred Astrm'] == cls_pred)]
+        results_subset = results_df.loc[(results_df['y_true'] == cls_true) & (results_df['y_pred ZTF + AstrmClf'] == cls_pred)]
         lc_subset = light_curves[results_subset.index]
         print('Class true {}\tclass pred {}'.format(cls_true, cls_pred))
         plot_light_curves(lc_subset, results_subset)
@@ -146,11 +148,15 @@ def plot_cls_light_curves(results_df, light_curves):
 
 def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     plt.figure()
-
+    
     # Make bins and get number of quasars in bins
     min, max = results_df[x].min(), results_df[x].max()
+    
+    if x == 'Z':
+        max = 4
+    
     n_bins = 40
-    bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x in ['n_obs', 'n_obs_200'] else np.linspace(min, max, n_bins)
+    bins = np.logspace(np.log10(min), np.log10(max), n_bins) if x in ['n obs'] else np.linspace(min, max, n_bins)
     mid_points = np.array([(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)])
     results_df['bin'] = pd.cut(results_df[x], bins, include_lowest=True)
     groups = results_df.groupby('bin')
@@ -164,7 +170,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     for y_pred_column in labels:
         acc = groups.apply(lambda x: accuracy_score(x['y_true'], x[y_pred_column]))
         qso_f1 = groups.apply(lambda x: f1_score(x['y_true'], x[y_pred_column], average=None, labels=['GALAXY', 'QSO', 'STAR'],
-                                                 zero_division=np.nan)[1])
+                                                 zero_division=0)[1])
 
         # Plot only bins with enough number of QSOs
         acc, qso_f1 = acc[mask], qso_f1[mask]
@@ -188,14 +194,14 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     plt.plot(mid_points, n_qso, '--', label='QSO distribution', color='grey', alpha=0.5)
 
     plt.xlabel(pretty_print(x))
-    if x in ['n_obs', 'n_obs_200']:
+    if x in ['n obs']:
         plt.xscale('log')
     legend_loc = {
-        'mag_median': 'lower right',
+        'mag median': 'lower center',
         'redshift': 'lower center',
-        'n_obs': 'lower center',
-        'cadence_mean': 'lower center',
-        'cadence_std': 'upper right',
+        'n obs': 'lower center',
+        'cadence mean': 'lower center',
+        'cadence std': 'upper right',
     }
     loc = legend_loc[x] if x in legend_loc else None
     plt.legend(loc=loc)
@@ -229,7 +235,7 @@ def plot_feature_ranking(features, importances, n_features=15, n_top_offsets=1, 
 
     val_0 = importances_sorted[0]
     for i, value in enumerate(importances_sorted):
-        offset = -0.17 * val_0 if i < n_top_offsets else .01 * val_0
+        offset = -0.21 * val_0 if i < n_top_offsets else .01 * val_0
         color = 'white' if i < n_top_offsets else 'black'
         ax.text(value + offset, i + .1, '{:.2f}%'.format(value), color=color)
 

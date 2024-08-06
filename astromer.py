@@ -20,7 +20,7 @@ def build_model(encoder, n_classes=3, maxlen=200, train_astromer=True, lr=1e-3):
     classifier.compile(
         loss=CategoricalCrossentropy(from_logits=True),
         metrics=['accuracy'],
-        optimizer=Adam(lr)
+        optimizer=Adam(lr),
     )
 
     return classifier

@@ -77,7 +77,7 @@ def preprocess_ztf_light_curves(data, data_sdss=None, data_features=None, min_n_
     original_size = len(data)
     print('Preprocessing input data size: {}'.format(original_size))
 
-    # Get at least 21 observations
+    # Get at least 20 observations
     n_obs = [len(lc_dict['mjd']) for lc_dict in data]
     idx = np.array(n_obs) >= min_n_obs
     data = np.array(data)[np.where(idx)]
@@ -95,7 +95,7 @@ def preprocess_ztf_light_curves(data, data_sdss=None, data_features=None, min_n_
             data = [average_nights(lc_dict) for lc_dict in tqdm(data, 'Averaging nights')]
     gc.collect()
 
-    # Get at least 21 observations after the deep drilling
+    # Get at least 20 observations after the deep drilling
     n_obs = [len(lc_dict['mjd']) for lc_dict in data]
     idx = np.array(n_obs) >= min_n_obs
     data = np.array(data)[np.where(idx)]

@@ -31,7 +31,7 @@ fields = [k for k in fields_dict if fields_dict[k] > 0]
 # fields = [k for k in fields if k in test_fields]
 
 # Get a chunk of fields
-fields = fields[500:]
+# fields = fields[:500]
 
 # Scan for files
 to_process, n_obj = [], []
@@ -48,10 +48,7 @@ all_data = sum(n_obj)
 done_data = 0
 
 with tqdm('Downloading data', total=all_data) as pbar:
-
     for i, field in enumerate(to_process):
-        gc.collect()
-
         output_file_name = 'ZTF/ZTF_{}/fields/ZTF_{}__field_{}__{}-band'.format(
             date, date, field, filter_name)
         output_file_name = os.path.join(STORAGE_PATH, output_file_name)
@@ -63,33 +60,43 @@ with tqdm('Downloading data', total=all_data) as pbar:
         if not os.path.exists(output_file_name + '.xz') and os.path.exists(ids_file_name):
             print('Processing filter: {}, field: {}'.format(filter_name, field))
 
-            kowalski = Kowalski(
-                username=KOWALSKI_USERNAME,
-                password=KOWALSKI_PASSWORD,
-                host='melman.caltech.edu',
-                timeout=99999999,
-            )
-
             # Read the IDs
             with open(ids_file_name, 'rb') as file:
                 ids = np.load(file)
 
-            data = get_ztf_light_curves(ids, date, kowalski)
-            
-            # Extract DF and array
-            df = pd.DataFrame(data, columns=['id', 'ra', 'dec', 'n obs'])
-            df['n obs'] = [len(lc_dict['mjd']) for lc_dict in data]
-            data = [np.array([lc_dict['mjd'], lc_dict['mag'], lc_dict['magerr']]) for lc_dict in data]
-            kowalski.close()
-            gc.collect()
+            # Split the IDs in chunks not too large to zip the results
+            chunk_size = 2000000
+            ids_chunked = [ids[i:i + chunk_size] for i in range(0, len(ids), chunk_size)]
 
-            # Save both
-            save_fits(df, output_file_name + '.fits', overwrite=True, with_print=False)
-            with lzma.open(output_file_name + '.xz', 'wb') as f:
-                pickle.dump(data, f)
-            gc.collect()
+            # Get the data
+            for j, ids in enumerate(ids_chunked):
+                if len(ids) > 1:
+                    output_chunk_file_name = output_file_name + '__chunk_{}'.format(j)
+                else:
+                    output_chunk_file_name = output_file_name
+                
+                # Check if a chunk file exists
+                if not os.path.exists(output_chunk_file_name + '.xz'):
+                    
+                    kowalski = Kowalski(
+                        username=KOWALSKI_USERNAME,
+                        password=KOWALSKI_PASSWORD,
+                        host='melman.caltech.edu',
+                        timeout=99999999,
+                    )
+                    df, data = get_ztf_light_curves(ids, date, kowalski)
+                    kowalski.close()
+                    gc.collect()
+
+                    # Save both
+                    save_fits(df, output_chunk_file_name + '.fits', overwrite=True, with_print=False)
+                    with lzma.open(output_chunk_file_name + '.xz', 'wb') as f:
+                        pickle.dump(data, f)
+                    gc.collect()
+                    
+                    # Print the progress
+                    print('Original IDs: {}, light curves: {}, saved to: {}'.format(
+                        len(ids), len(data), output_chunk_file_name))
 
             # Update the progress
             pbar.update(n_obj[i])
-            print('Original IDs: {}, light curves: {}, saved to: {}'.format(
-                len(ids), len(data), output_file_name))

@@ -172,6 +172,8 @@ for label, y_true in [('train', y_train), ('val', y_val), ('test', y_test)]:
         num_to_class_dict = {v: k for k, v in class_dict.items()}
         df['y_pred'] = [num_to_class_dict[y] for y in y_class]
         df['y_true'] = [num_to_class_dict[y] for y in y_true]
+        
+        # TODO: add mag median and mag err to the dataframe
 
         outputs_file_name = 'outputs/preds/ZTF_{}/{}__{}.csv'.format(ztf_date, experiment_name, label)
         outputs_file_path = os.path.join(PROJECT_PATH, outputs_file_name)
