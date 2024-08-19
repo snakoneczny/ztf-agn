@@ -15,9 +15,9 @@ from utils import save_fits
 
 
 catalogs = [
-    # 'PS1_DR1',
+    'PS1_DR1',
     # 'AllWISE',
-    'Gaia_EDR3',
+    # 'Gaia_EDR3',
 ]
 chunk_size = 1e6
 

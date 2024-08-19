@@ -1,11 +1,35 @@
+import math
+
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report, accuracy_score, f1_score
 from tqdm.autonotebook import tqdm
+import seaborn as sns
 
-from utils import pretty_print, pretty_print_features
+from utils import pretty_print, pretty_print_features, pretty_print_feature_sets
 from plotting import plot_light_curves
+
+
+def redshift_report(results, features_label, z_max=5, title=None):    
+    results = results.loc[(results['z_true'] < z_max) & (results['z_pred ' + features_label] < z_max)]
+
+    z_true = results['z_true']
+    z_pred = results['z_pred ' + features_label]
+    z_err = np.mean(abs(z_true - z_pred) / (1 + z_true))
+
+    ax = sns.displot(x=z_true, y=z_pred)
+    plt.plot(range(z_max + 1), range(z_max + 1), '-')
+
+    text = '$\\frac{|z_{\mathrm{spec}} - z_{\mathrm{pred}}|}{1 + z_{\mathrm{spec}}} = ' + str(np.round(z_err, 2)) + '$'
+    ax.fig.text(0.2, 0.85, text, fontsize='large')
+
+    ax.set_xlabels('$z_{\mathrm{spec}}$')
+    ax.set_ylabels('$z_{\mathrm{pred}}$')
+
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
 
 
 def print_summary_table(results_dict, labels=None, filters=None, concise=False):
@@ -94,7 +118,7 @@ def make_reports(results_df_dict, feature_importance_dict, filter, data_label, f
         results_df['y_pred'] = results_df['y_pred {}'.format(features_label)]
 
         feature_importance = feature_importance_dict[features_label] if features_label in feature_importance_dict else None
-        make_report(results_df, feature_importance)
+        make_report(results_df, feature_importance, filter)
         print('--------------------')
 
 
@@ -102,7 +126,7 @@ def get_feature_labels(columns):
     return [column[7:] for column in columns if len(column) > 6 and column[:6] == 'y_pred']
 
 
-def make_report(results_df, feature_importances=None, label=None):
+def make_report(results_df, feature_importances=None, filter=None, label=None):
     y_pred_column = 'y_pred {}'.format(label) if label else 'y_pred'
     feature_importances = feature_importances[label] if label and feature_importances else feature_importances
 
@@ -122,8 +146,7 @@ def make_report(results_df, feature_importances=None, label=None):
 
     # Feature importance
     if feature_importances is not None:
-        plot_feature_ranking(feature_importances['features'], feature_importances['importances'],
-                             n_features=15, n_top_offsets=1)
+        plot_feature_ranking(feature_importances, filter, n_features=10, n_top_offsets=1)
 
 
 def plot_cls_light_curves(results_df, light_curves):
@@ -179,7 +202,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
         min = np.min([min, acc.min(), qso_f1.min()]) if with_accuracy else np.min([min, qso_f1.min()])
         max = np.max([max, acc.max(), qso_f1.max()]) if with_accuracy else np.max([max, qso_f1.max()])
 
-        label = pretty_print_features(' '.join(y_pred_column.split(' ')[1:]))
+        label = pretty_print_feature_sets(' '.join(y_pred_column.split(' ')[1:]))
         if with_accuracy:
             plt.plot(mid_points, acc, label='3-class accuracy {}'.format(label), alpha=0.9)
             label = 'QSO F1 {}'.format(label)
@@ -215,7 +238,8 @@ def plot_confusion_matrix(y_test, y_pred, labels):
     plt.show()
 
 
-def plot_feature_ranking(features, importances, n_features=15, n_top_offsets=1, title=None):
+def plot_feature_ranking(features_dict, ztf_band, n_features=15, n_top_offsets=1, offset=0.142, title=None, annotation=None):
+    features, importances = features_dict['features'], features_dict['importances']
     importances = np.array(importances) * 100
 
     indices = np.argsort(importances)[::-1]
@@ -225,21 +249,25 @@ def plot_feature_ranking(features, importances, n_features=15, n_top_offsets=1, 
     features_sorted = np.array(features)[indices]
     importances_sorted = np.array(importances)[indices]
 
+    feature_printed = [pretty_print_features(x, ztf_band) for x in features_sorted]
+
     fig, ax = plt.subplots(figsize=(6, 7))
     ax.barh(range(len(features_sorted)), importances_sorted, align='center')  # , color=get_cubehelix_palette(1)[0])
     ax.set_yticks(range(len(features_sorted)))
 
-    ax.set_yticklabels(features_sorted)
+    ax.set_yticklabels(feature_printed)
     ax.invert_yaxis()
     ax.set_xlabel('feature importance (%)')
 
     val_0 = importances_sorted[0]
     for i, value in enumerate(importances_sorted):
-        offset = -0.21 * val_0 if i < n_top_offsets else .01 * val_0
+        offset_val = -offset * val_0 if i < n_top_offsets else .01 * val_0
         color = 'white' if i < n_top_offsets else 'black'
-        ax.text(value + offset, i + .1, '{:.2f}%'.format(value), color=color)
+        ax.text(value + offset_val, i + .1, '{:.2f}%'.format(value), color=color)
 
     ax.grid(False)
+    ax.text(0.918, 0.064, annotation, transform=ax.transAxes, ha='right', va='bottom', fontsize='large',
+            bbox={'facecolor': 'white', 'alpha': 1.0, 'pad': 10})
     plt.title(title)
     plt.tight_layout()
     plt.show()

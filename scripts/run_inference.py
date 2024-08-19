@@ -50,7 +50,7 @@ input_paths = np.array(input_paths)[idx]
 astromer = SingleBandEncoder()
 astromer = astromer.from_pretraining('ztfg')
 astromer_encoder = astromer.model.get_layer('encoder')
-classifier = build_model(astromer_encoder, n_classes=3, maxlen=astromer.maxlen, train_astromer=False)
+classifier = build_model(astromer_encoder, n_outputs=3, maxlen=astromer.maxlen, train_astromer=False)
 path_astromer = 'outputs/models/ZTF_{}/ZTF_{}__band_{}__xmatch_ZTF__astromer_FC-1024-512-256'.format(date, date, filter)
 classifier.load_weights(os.path.join(PROJECT_PATH, path_astromer))
 

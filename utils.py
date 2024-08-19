@@ -20,10 +20,11 @@ def pretty_print(x):
     return x
 
 
-def pretty_print_features(x):
+def pretty_print_feature_sets(x):
     pretty_dict = {
         'ZTF + AstrmClf': 'ZTF',
         'ZTF + AstrmClf + PS': 'ZTF + PS',
+        'ZTF + AstrmClf + WISE': 'ZTF + WISE',
         'Astrm': 'Astromer',
         'PS': 'Pan-STARRS',
     }
@@ -31,6 +32,46 @@ def pretty_print_features(x):
         return pretty_dict[x]
     else:
         return x
+
+
+def pretty_print_features(x, ztf_band=None):    
+    if '__minus__' in x:
+        features = x.split('__minus__')
+        return '${}-{}$'.format(pretty_print_feature(features[0], ztf_band), pretty_print_feature(features[1], ztf_band))
+    elif 'astrm' in x:
+        cls_name = x[6:]
+        cls_name = 'QSO' if cls_name == 'qso' else cls_name
+        return '$p_\mathrm{{lc}}(\mathrm{{{}}})$'.format(cls_name)
+    elif x == 'mag median':
+        return '${}_\mathrm{{{}}}$'.format(ztf_band, 'ZTF')
+    else:
+        survey_name, feature_name = x.split('__')
+        if '-' in feature_name:
+            feature_name_a, feature_name_b = feature_name.split('-')
+            feature_name_a = pretty_print_feature('{}__{}'.format(survey_name, feature_name_a), ztf_band)
+            feature_name_b = pretty_print_feature('{}__{}'.format(survey_name, feature_name_b), ztf_band)
+            return('${}-{}$'.format(feature_name_a, feature_name_b))
+        else:
+            return '${}$'.format(pretty_print_feature('{}__{}'.format(survey_name, feature_name), ztf_band))
+
+
+def pretty_print_feature(feature_name, ztf_band=None):
+    if feature_name == 'mag median':
+        survey_name, filter_name = 'ZTF', ztf_band
+    else:
+        survey_name, filter_name = feature_name.split('__')
+        survey_name = {
+            'PS1_DR1': 'PS',
+            'AllWISE': 'WISE',
+            'Gaia_EDR3': 'Gaia',
+        }[survey_name]
+        if survey_name == 'PS':
+            filter_name = filter_name[0]
+        elif survey_name == 'WISE':
+            filter_name = filter_name[:2].capitalize()
+        elif survey_name == 'Gaia':
+            filter_name = filter_name[5:6]
+    return '{}_\mathrm{{{}}}'.format(filter_name, survey_name)
 
 
 def save_fits(data, file_path, overwrite=False, with_print=True):

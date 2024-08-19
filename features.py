@@ -53,14 +53,32 @@ FEATURES_DICT = {
         # 'Gaia_EDR3__parallax_error', 'Gaia_EDR3__pmra_error', 'Gaia_EDR3__pmdec_error',
         # 'Gaia_EDR3__astrometric_excess_noise',
     ],
+    'GAIA mags': [
+        'Gaia_EDR3__phot_g_mean_mag', 'Gaia_EDR3__phot_bp_mean_mag', 'Gaia_EDR3__phot_rp_mean_mag',        
+    ],
 }
 
 
-def add_colors(data):
+def get_features(features_dict, feature_sets, is_cross_features=False):
+    # Add every survey separately
+    features = np.concatenate([features_dict[feature_set] for feature_set in feature_sets])
+    # Add combinations
+    if is_cross_features:
+        surveys_to_merge = ['ZTF', 'PS', 'WISE', 'GAIA']
+        for i, survey_a in enumerate(feature_sets[:-1]):
+            for survey_b in feature_sets[i + 1:]:
+                if survey_a in surveys_to_merge and survey_b in surveys_to_merge:
+                    features = np.concatenate([features, features_dict['{} - {}'.format(survey_a, survey_b)]])
+    return features.tolist()
+
+
+def add_colors(data, is_cross_features=False):
     new_feature_sets = copy.deepcopy(FEATURES_DICT)
-    for set_name in ['PS', 'WISE']:
+    # First iterate through the surveys
+    for set_name in ['PS', 'WISE', 'GAIA']:
+        set_name_tmp = 'GAIA mags' if set_name == 'GAIA' else set_name
+        cols = FEATURES_DICT[set_name_tmp]
         new_feature_names = []
-        cols = FEATURES_DICT[set_name]
         for i in range(len(cols)):
             for j in range(i + 1, len(cols)):
                 feature_name = '{}__{}-{}'.format(cols[i].split('__')[0], cols[i].split('__')[1],
@@ -68,6 +86,26 @@ def add_colors(data):
                 data.loc[:, feature_name] = data.loc[:, cols[i]] - data.loc[:, cols[j]]
                 new_feature_names.append(feature_name)
         new_feature_sets[set_name].extend(new_feature_names)
+
+    # Then, iterate through all possible combinations between the surveys
+    if is_cross_features:
+        to_iterate = ['ZTF', 'PS', 'WISE', 'GAIA']
+        for i, survey_a in enumerate(to_iterate[:-1]):
+            cols_a = FEATURES_DICT[survey_a]
+            
+            for survey_b in to_iterate[i + 1:]:
+                set_name = '{} - {}'.format(survey_a, survey_b)
+                survey_b_tmp = survey_b if survey_b != 'GAIA' else 'GAIA mags'
+                cols_b = FEATURES_DICT[survey_b_tmp] 
+                
+                feature_names = []
+                for feature_a in cols_a:
+                    for feature_b in cols_b:
+                        feature_name = '{}__minus__{}'.format(feature_a, feature_b)
+                        data.loc[:, feature_name] = data.loc[:, feature_a] - data.loc[:, feature_b]
+                        feature_names.append(feature_name)
+                new_feature_sets[set_name] = feature_names
+
     return data, new_feature_sets
 
 

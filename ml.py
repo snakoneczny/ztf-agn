@@ -7,47 +7,81 @@ import numpy as np
 import pandas as pd
 import json
 from tqdm.autonotebook import tqdm
-from xgboost import XGBClassifier
-from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier, XGBRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
 
 from env_config import DATA_PATH, PROJECT_PATH
-from features import FEATURES_DICT
+from features import FEATURES_DICT, get_features
 from light_curves import subsample_light_curves
+from ztf import LIMITING_MAGS
 
 
 FILE_NAMES = {
-    'preds': 'outputs/preds/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB_test.csv',
-    'features': 'outputs/feature_importance/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB.json',
-    'model': 'outputs/models/ZTF_{}/XGB__ZTF_{}_band_{}__features_{}.pickle',
+    'clf': {
+        'preds': 'outputs/preds/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB.csv',
+        'features': 'outputs/feature_importance/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB.json',
+        'model': 'outputs/models/ZTF_{}/ZTF_{}_band_{}__features_{}__XGB.pickle',
+    },
+    'z': {
+        'preds': 'outputs/preds/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB_z.csv',
+        'features': 'outputs/feature_importance/ZTF_{}/ZTF_{}_band_{}__xmatch_{}__XGB_z.json',
+        'model': 'outputs/models/ZTF_{}/ZTF_{}_band_{}__features_{}__XGB_z.pickle',        
+    },
 }
 
-def run_experiments(data_labels, feature_labels, master_df, features_dict, filter, ztf_date):
+
+def get_file_name(output, problem, ztf_date, filter, data_label, cross_features=False, mag_limit=False):
+    file_name = FILE_NAMES[problem][output]
+    file_name, extension = file_name.split('.')
+    if mag_limit:
+        file_name += '_mag-limit'        
+    if cross_features:
+        file_name += '_cross-features'
+    file_name = file_name + '.' + extension
+    file_name = file_name.format(ztf_date, ztf_date, filter, data_label)
+    return file_name
+
+
+def run_experiments(data_labels, feature_labels, master_df, features_dict, filter, ztf_date, is_redshift,
+                    is_mag_limit, is_cross_features):
     # Add Astromer as features
     if 'ZTF' in data_labels:
+        file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_ZTF__astromer_FC-1024-512-256'.format(
+            ztf_date, ztf_date, filter)
+        if is_redshift:
+            file_name += '__redshift'
+        file_name += '__{}.csv'
         for split_label in ['train', 'val', 'test']:
-            file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_ZTF__astromer_FC-1024-512-256__{}.csv'.format(
-                ztf_date, ztf_date, filter, split_label)
-            file_path = os.path.join(PROJECT_PATH, file_name)
+            file_path = os.path.join(PROJECT_PATH, file_name.format(split_label))
             if os.path.exists(file_path):
                 df_preds = pd.read_csv(file_path)
-                for class_label in ['GALAXY', 'QSO', 'STAR']:
-                    master_df.loc[master_df['train_split'] == split_label, 'astrm_{}'.format(class_label.lower())] = df_preds[class_label].to_list()
-    
+                if is_redshift:
+                    master_df.loc[master_df['train_split'] == split_label, 'astrm_z_qso'] = df_preds['y_pred'].to_list()
+                else:
+                    for class_label in ['GALAXY', 'QSO', 'STAR']:
+                        master_df.loc[master_df['train_split'] == split_label, 'astrm_{}'.format(class_label.lower())] = df_preds[class_label].to_list()
+
     # Take all data together to reduce the input data frame
     data_features = np.concatenate([FEATURES_DICT[label] for label in data_labels])
     master_df = master_df.dropna(subset=data_features).reset_index(drop=True)
 
+    # Limit the magnitudes
+    if is_mag_limit:
+        master_df = limit_mags(master_df, filter, data_labels)
+
     # Make one split for all experiments
-    df_dict, y_dict, y_encoded_dict = {}, {}, {}
+    df_dict, y_dict = {}, {}
     split_labels = ['train', 'val', 'test']
     cls_dict = {'GALAXY': 0, 'QSO': 1, 'STAR': 2}
     for label in split_labels:
         df_dict[label] = master_df.loc[master_df['train_split'] == label]
-        y_dict[label] = df_dict[label]['CLASS']
-        y_encoded_dict[label] = [cls_dict[x] for x in y_dict[label]]
+        if is_redshift:
+            y_dict[label] = df_dict[label]['Z']
+        else:
+            y_dict[label] = df_dict[label]['CLASS']
+            y_dict[label] = [cls_dict[x] for x in y_dict[label]]
 
     # Add things which are common to all feature set experiments
     results = df_dict['test'][[
@@ -58,92 +92,163 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
     ]]
 
     # Placeholder for classifiers
-    classifiers = {}
+    models = {}
 
     # Iterate over feature sets
     for feature_sets in tqdm(feature_labels):
         # Extract features
-        features = np.concatenate([features_dict[feature_set] for feature_set in feature_sets])
+        features = get_features(features_dict, feature_sets, is_cross_features)
         X_dict = {}
         for label in split_labels:
             X_dict[label] = df_dict[label][features].values
 
         # Train a model
-        clf = XGBClassifier(
-            max_depth=9, learning_rate=0.1, gamma=0, min_child_weight=1, colsample_bytree=0.9, subsample=0.8,
-            scale_pos_weight=2, reg_alpha=0, reg_lambda=1, n_estimators=100000, objective='multi:softmax',
-            booster='gbtree', max_delta_step=0, colsample_bylevel=1, base_score=0.5, random_state=18235, missing=np.nan,
-            verbosity=0, n_jobs=36, early_stopping_rounds=20,
-        )
-        clf.fit(X_dict['train'], y_encoded_dict['train'], eval_set=[(X_dict['val'], y_encoded_dict['val'])])
+        if is_redshift:
+            model = XGBRegressor(
+                max_depth=9, learning_rate=0.1, gamma=0, min_child_weight=1, colsample_bytree=0.9, subsample=0.8,
+                scale_pos_weight=2, reg_alpha=0, reg_lambda=1, n_estimators=100000, objective='reg:squarederror',
+                booster='gbtree', max_delta_step=0, colsample_bylevel=1, base_score=0.5, random_state=18235, missing=np.nan,
+                verbosity=0, n_jobs=36, early_stopping_rounds=20,
+            )
+        else:
+            model = XGBClassifier(
+                max_depth=9, learning_rate=0.1, gamma=0, min_child_weight=1, colsample_bytree=0.9, subsample=0.8,
+                scale_pos_weight=2, reg_alpha=0, reg_lambda=1, n_estimators=100000, objective='multi:softmax',
+                booster='gbtree', max_delta_step=0, colsample_bylevel=1, base_score=0.5, random_state=18235, missing=np.nan,
+                verbosity=0, n_jobs=36, early_stopping_rounds=20,
+            )
 
-        # Make classification
-        y_pred_proba = clf.predict_proba(X_dict['test'])
-        y_pred_cls = np.argmax(y_pred_proba, axis=1)
-        cls_dict = {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
-        y_pred_cls = [cls_dict[x] for x in y_pred_cls]
+        # Fit the model
+        model.fit(X_dict['train'], y_dict['train'], eval_set=[(X_dict['val'], y_dict['val'])], verbose=False)
 
-        # Save results
+        # Save the model and features
         features_label = ' + '.join(feature_sets)
-        results['y_pred {}'.format(features_label)] = y_pred_cls
-        results['y_galaxy {}'.format(features_label)] = y_pred_proba[:, 0]
-        results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
-        results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
-        classifiers[features_label] = clf
+        models[features_label] = model
+        
+        # Make classification and save the results
+        if is_redshift:
+            z_pred = model.predict(X_dict['test'])
+            results['z_pred {}'.format(features_label)] = z_pred
+        else:
+            y_pred_proba = model.predict_proba(X_dict['test'])
+            y_pred_cls = np.argmax(y_pred_proba, axis=1)
+            cls_dict = {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
+            y_pred_cls = [cls_dict[x] for x in y_pred_cls]
 
-    return results, classifiers
+            results['y_pred {}'.format(features_label)] = y_pred_cls
+            results['y_galaxy {}'.format(features_label)] = y_pred_proba[:, 0]
+            results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
+            results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
+
+    return results, models
 
 
-def load_results(data_compositions, ztf_date, filters):
+def limit_mags(data, filter, data_labels):
+    if 'ZTF' in data_labels:
+        data = data.loc[(data['mag median'] < LIMITING_MAGS[filter])]
+
+    if 'PS' in data_labels:
+        for filter_name in ['g', 'r', 'i', 'z']:
+            col = 'PS1_DR1__{}MeanPSFMag'.format(filter_name)
+            data = data.loc[data[col] < LIMITING_MAGS[col]]
+
+    if 'WISE' in data_labels:
+        for filter_name in ['w1', 'w2']:
+            col = 'AllWISE__{}mpro'.format(filter_name)
+            data = data.loc[data[col] < LIMITING_MAGS[col]]
+
+    if 'GAIA' in data_labels:
+        for filter_name in ['g']:
+            col = 'Gaia_EDR3__phot_{}_mean_mag'.format(filter_name)
+            data = data.loc[data[col] < LIMITING_MAGS[col]]
+
+    return data
+
+
+def load_results(data_compositions, ztf_date, filters, mag_limit=False, cross_features=False):
     # Resulting data structures
     results_dict = {}
     feature_importance_dict = {}
 
-    for filter in filters:
-        results_dict[filter] = {}
-        feature_importance_dict[filter] = {}
+    for task in ['clf', 'z']:
+        results_dict[task] = {}
+        feature_importance_dict[task] = {}
 
-        for data_composition in data_compositions:
-            data_label = '_'.join(data_composition)
+        for filter in filters:
+            results_dict[task][filter] = {}
+            feature_importance_dict[task][filter] = {}
 
-            # Read predictions
-            file_name = FILE_NAMES['preds'].format(ztf_date, ztf_date, filter, data_label)
-            file_path = os.path.join(PROJECT_PATH, file_name)
-            results_dict[filter][data_label] = pd.read_csv(file_path)
-            print('Loaded results: {}'.format(file_path))
+            for data_composition in data_compositions:
+                data_label = '_'.join(data_composition)
 
-            # Read feature importances
-            file_name = FILE_NAMES['features'].format(ztf_date, ztf_date, filter, data_label)
-            file_path = os.path.join(PROJECT_PATH, file_name)
-            with open(file_path) as file:
-                feature_importance_dict[filter][data_label] = json.load(file)
-            print('Loaded feature importances: {}'.format(file_path))
+                # Read predictions
+                file_name = get_file_name('preds', task, ztf_date, filter, data_label,
+                                          cross_features=cross_features, mag_limit=mag_limit)                
+                file_path = os.path.join(PROJECT_PATH, file_name)
+                if os.path.exists(file_path):
+                    results_dict[task][filter][data_label] = pd.read_csv(file_path)
+                    print('Loaded results: {}'.format(file_path))
 
-            # Check if Astromer present and add as well
-            file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_{}__astromer_FC-1024-512-256__test.csv'.format(ztf_date, ztf_date, filter, data_label)
-            file_path = os.path.join(PROJECT_PATH, file_name)
-            if os.path.exists(file_path):
-                df_preds = pd.read_csv(file_path)
-                prediction_label = 'y_pred Astrm'
-                results_dict[filter][data_label][prediction_label] = df_preds['y_pred']
-                print('Loaded Astromer: {}'.format(file_path))
+                # Read feature importances
+                file_name = get_file_name('features', task, ztf_date, filter, data_label,
+                                          cross_features=cross_features, mag_limit=mag_limit)                
+                file_path = os.path.join(PROJECT_PATH, file_name)
+                if os.path.exists(file_path):
+                    with open(file_path) as file:
+                        feature_importance_dict[task][filter][data_label] = json.load(file)
+                    print('Loaded feature importances: {}'.format(file_path))
 
-    # TODO: Refactor
-    for filter in filters:
-        for key in results_dict[filter]:
-            results_dict[filter][key]['y_true'] = results_dict[filter][key]['CLASS']
+                # Check if Astromer present and add as well
+                file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_{}__astromer_FC-1024-512-256'
+                if task == 'z':
+                    file_name += '__redshift'
+                file_name += '__test.csv'
+                file_name = file_name.format(ztf_date, ztf_date, filter, data_label)
+                file_path = os.path.join(PROJECT_PATH, file_name)
+                if os.path.exists(file_path) and data_label in results_dict[task][filter]:
+                    df_preds = pd.read_csv(file_path)
+                    col_pred = 'z_pred Astrm' if task == 'z' else 'y_pred Astrm'
+                    results_dict[task][filter][data_label][col_pred] = df_preds['y_pred']
+                    print('Loaded Astromer: {}'.format(file_path))
 
-    return results_dict, feature_importance_dict
+        # TODO: Refactor
+        for filter in filters:
+            for key in results_dict[task][filter]:
+                col_true_a = 'CLASS' if task == 'clf' else 'Z'
+                col_true_b = 'z_true' if task == 'z' else 'y_true'
+                results_dict[task][filter][key][col_true_b] = results_dict[task][filter][key][col_true_a]
+
+    return results_dict['clf'], results_dict['z'], feature_importance_dict['clf'], feature_importance_dict['z']
 
 
 def read_train_matrices(ztf_date, filter_name):
-    path = os.path.join(DATA_PATH, 'ZTF_x_SDSS/ZTF_20240117/matrices/ZTF_{}_filter_{}__{}_{}.pickle')
-    data = {'X': {}, 'y': {}}
-    for label_matrix in data:
-        for label_split in ['train', 'val', 'test']:
-            with open(path.format(ztf_date, filter_name, label_matrix, label_split), 'rb') as file:
-                data[label_matrix][label_split] = pickle.load(file)
-    return data['X']['train'], data['X']['val'], data['X']['test'], data['y']['train'], data['y']['val'], data['y']['test']
+    file_name = 'ZTF_x_SDSS/ZTF_{}/matrices/ZTF_{}_filter_{}.pickle'.format(ztf_date, ztf_date, filter_name)
+    with open(os.path.join(DATA_PATH, file_name), 'rb') as file:
+        data = pickle.load(file)
+    return data['X']['train'], data['X']['val'], data['X']['test'], data['y']['train'], data['y']['val'], data['y']['test'], data['z']['train'], data['z']['val'], data['z']['test']
+
+
+def save_train_matrices(ztf_date, filter_name, X_train, X_val, X_test, y_train, y_val, y_test, z_train, z_val, z_test):
+    data = {
+        'X': {
+            'train': X_train,
+            'val': X_val,
+            'test': X_test,
+        },
+        'y': {
+            'train': y_train,
+            'val': y_val,
+            'test': y_test,
+        },
+        'z': {
+            'train': z_train,
+            'val': z_val,
+            'test': z_test,
+        },
+    }
+    file_name = 'ZTF_x_SDSS/ZTF_{}/matrices/ZTF_{}_filter_{}.pickle'.format(ztf_date, ztf_date, filter_name)
+    with open(os.path.join(DATA_PATH, file_name), 'wb') as file:
+        pickle.dump(data, file)
 
 
 def get_train_matrices(ztf_date, filter, minimum_timespan=None, timespan=None, frac_n_obs=None):
@@ -159,12 +264,12 @@ def get_train_matrices(ztf_date, filter, minimum_timespan=None, timespan=None, f
             timespan=timespan, frac_n_obs=frac_n_obs)
 
     # Change shape to feed a neural network and sample random 200 observations
-    X_train, X_val, X_test, y_train, y_val, y_test = make_train_test_split(ztf_x_sdss, sdss_x_ztf)
+    X_train, X_val, X_test, y_train, y_val, y_test, z_train, z_val, z_test = make_train_test_split(ztf_x_sdss, sdss_x_ztf)
 
     if timespan:
-        return X_train, X_val, X_test, y_train, y_val, y_test, n_obs_subsampled
+        return X_train, X_val, X_test, y_train, y_val, y_test, z_train, z_val, z_test, n_obs_subsampled
     else:
-        return X_train, X_val, X_test, y_train, y_val, y_test
+        return X_train, X_val, X_test, y_train, y_val, y_test, z_train, z_val, z_test
 
 
 def make_train_test_split(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False):
@@ -182,6 +287,7 @@ def make_train_test_split(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False):
         'STAR': 2,
     }
     y = sdss_x_ztf['CLASS'].apply(lambda x: class_dict[x]).to_list()
+    z = sdss_x_ztf['Z'].to_list()
 
     idx_train = np.where(sdss_x_ztf['train_split'] == 'train')[0]
     idx_val = np.where(sdss_x_ztf['train_split'] == 'val')[0]
@@ -192,8 +298,11 @@ def make_train_test_split(ztf_x_sdss, sdss_x_ztf, with_multiprocessing=False):
     y_train = [y[i] for i in idx_train]
     y_val = [y[i] for i in idx_val]
     y_test = [y[i] for i in idx_test]
+    z_train = [z[i] for i in idx_train]
+    z_val = [z[i] for i in idx_val]
+    z_test = [z[i] for i in idx_test]
 
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    return X_train, X_val, X_test, y_train, y_val, y_test, z_train, z_val, z_test
 
 
 def subsample_matrix_row(lc_dict):
