@@ -111,7 +111,7 @@ def get_ztf_light_curves(ids, date, kowalski):
     to_return = []
     for query in tqdm(queries):
         responses = kowalski.query(queries=query, use_batch_query=True, max_n_threads=10)        
-        
+
         data = np.concatenate([response.get('data') for response in responses.get('default')])
         data = sorted(data, key=lambda d: d['_id'])
 
@@ -126,7 +126,7 @@ def get_ztf_light_curves(ids, date, kowalski):
     df = pd.DataFrame(to_return, columns=['id', 'ra', 'dec', 'n obs'])
     df['n obs'] = [len(lc_dict['mjd']) for lc_dict in to_return]
     to_return = [np.array([lc_dict['mjd'], lc_dict['mag'], lc_dict['magerr']]) for lc_dict in to_return]
-    
+
     return df, to_return
 
 
@@ -138,19 +138,19 @@ def get_catalog_data(catalog, kowalski, chunk_start=None, chunk_end=None, field_
     to_return = []
     still_working = True
     next_batch = 0 if chunk_start is None else chunk_start    
-    
+
     while still_working:
         gc.collect()
-        
+
         # Get responses
         queries = [get_find_query(catalog, limit, next_batch + i * limit, field_id=field_id, filter=filter) for i in range(n_threads)]
         responses = kowalski.query(queries=queries, use_batch_query=True, max_n_threads=n_threads)
-        
+
         # Concatenate
         data_arr = [response.get('data') for response in responses['default']]
         data_arr = [elem if elem is not None else [] for elem in data_arr]
         data = np.concatenate(data_arr)
-        
+
         # Sort
         ids = [obj['_id'] for obj in data]
         if field_id is not None:
