@@ -43,6 +43,7 @@ def plot_light_curves(light_curves, stats):
     stats = stats.reset_index(drop=True)
 
     # Sample
+    random.seed(3434)
     idx_sample = random.sample(range(len(light_curves)), 8)
 
     # Sort by redshift
@@ -60,6 +61,9 @@ def plot_light_curves(light_curves, stats):
 
         # Add statistics
         info = [
+            'ZTF id: ' + str(lc['id']),
+            'ra: ' + str(lc['ra'][0]),
+            'dec: ' + str(lc['dec'][0]),
             'class: {}'.format(stats.loc[idx, 'y_true']),
             'redshift: {:.1f}'.format(stats.loc[idx, 'Z']),
             'galaxy: {:.1f}%'.format(stats.loc[idx, 'y_galaxy ZTF + AstrmClf'] * 100),

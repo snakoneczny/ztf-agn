@@ -6,12 +6,13 @@ logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', datefmt='%d
 logger = logging.getLogger(__name__)
 
 
-def pretty_print(x):
+def pretty_print(x, band=None):
+    if x == 'mag median':
+        return 'ZTF ${}$-band median magnitude'.format(band)
     pretty_dict = {
         'Z': 'redshift',
         'n obs': 'number of observation epochs',
-        'mag median': 'median magnitude',
-        'mean cadence': 'mean cadence',
+        'n_obs': 'number of observation epochs',
     }
     if x in pretty_dict:
         x = pretty_dict[x]    
@@ -27,6 +28,7 @@ def pretty_print_feature_sets(x):
         'ZTF + AstrmClf + WISE': 'ZTF + WISE',
         'Astrm': 'Astromer',
         'PS': 'Pan-STARRS',
+        'GAIA': 'Gaia',
     }
     if x in pretty_dict:
         return pretty_dict[x]
@@ -34,7 +36,7 @@ def pretty_print_feature_sets(x):
         return x
 
 
-def pretty_print_features(x, ztf_band=None):    
+def pretty_print_features(x, ztf_band=None):
     if '__minus__' in x:
         features = x.split('__minus__')
         return '${}-{}$'.format(pretty_print_feature(features[0], ztf_band), pretty_print_feature(features[1], ztf_band))
@@ -44,6 +46,9 @@ def pretty_print_features(x, ztf_band=None):
         return '$p_\mathrm{{lc}}(\mathrm{{{}}})$'.format(cls_name)
     elif x == 'mag median':
         return '${}_\mathrm{{{}}}$'.format(ztf_band, 'ZTF')
+    elif 'pmdec' in x or 'pmra' in x:
+        measurement = x.split('__')[1][2:]
+        return '$PM_\mathrm{' + measurement + ', Gaia}$'
     else:
         survey_name, feature_name = x.split('__')
         if '-' in feature_name:

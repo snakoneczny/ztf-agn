@@ -32,20 +32,25 @@ FILE_NAMES = {
 }
 
 
-def get_file_name(output, problem, ztf_date, filter, data_label, cross_features=False, mag_limit=False):
+def get_file_name(output, problem, ztf_date, filter, data_label, cross_features=False, mag_limit=False, qso_vs_rest=False,
+                  n_obs_limit=False):
     file_name = FILE_NAMES[problem][output]
     file_name, extension = file_name.split('.')
     if mag_limit:
         file_name += '_mag-limit'        
+    if n_obs_limit:
+        file_name += '_min-n-obs-100'
     if cross_features:
         file_name += '_cross-features'
+    if qso_vs_rest:
+        file_name += '_qso-vs-rest'
     file_name = file_name + '.' + extension
     file_name = file_name.format(ztf_date, ztf_date, filter, data_label)
     return file_name
 
 
 def run_experiments(data_labels, feature_labels, master_df, features_dict, filter, ztf_date, is_redshift,
-                    is_mag_limit, is_cross_features):
+                    is_mag_limit, is_cross_features, is_qso_vs_rest, is_n_obs_limit):
     # Add Astromer as features
     if 'ZTF' in data_labels:
         file_name = 'outputs/preds/ZTF_{}/ZTF_{}__band_{}__xmatch_ZTF__astromer_FC-1024-512-256'.format(
@@ -71,10 +76,14 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
     if is_mag_limit:
         master_df = limit_mags(master_df, filter, data_labels)
 
+    # Limit number of observations
+    if is_n_obs_limit:
+        master_df = master_df.loc[master_df['n obs'] >= 100]
+
     # Make one split for all experiments
     df_dict, y_dict = {}, {}
     split_labels = ['train', 'val', 'test']
-    cls_dict = {'GALAXY': 0, 'QSO': 1, 'STAR': 2}
+    cls_dict = {'GALAXY': 0, 'QSO': 1, 'STAR': 0} if is_qso_vs_rest else {'GALAXY': 0, 'QSO': 1, 'STAR': 2}
     for label in split_labels:
         df_dict[label] = master_df.loc[master_df['train_split'] == label]
         if is_redshift:
@@ -111,9 +120,10 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
                 verbosity=0, n_jobs=36, early_stopping_rounds=20,
             )
         else:
+            objective = 'binary:logistic' if is_qso_vs_rest else 'multi:softmax'
             model = XGBClassifier(
                 max_depth=9, learning_rate=0.1, gamma=0, min_child_weight=1, colsample_bytree=0.9, subsample=0.8,
-                scale_pos_weight=2, reg_alpha=0, reg_lambda=1, n_estimators=100000, objective='multi:softmax',
+                scale_pos_weight=2, reg_alpha=0, reg_lambda=1, n_estimators=100000, objective=objective,
                 booster='gbtree', max_delta_step=0, colsample_bylevel=1, base_score=0.5, random_state=18235, missing=np.nan,
                 verbosity=0, n_jobs=36, early_stopping_rounds=20,
             )
@@ -132,13 +142,17 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
         else:
             y_pred_proba = model.predict_proba(X_dict['test'])
             y_pred_cls = np.argmax(y_pred_proba, axis=1)
-            cls_dict = {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
+            cls_dict = {0: 'GALAXY/STAR', 1: 'QSO'} if is_qso_vs_rest else {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
             y_pred_cls = [cls_dict[x] for x in y_pred_cls]
 
             results['y_pred {}'.format(features_label)] = y_pred_cls
-            results['y_galaxy {}'.format(features_label)] = y_pred_proba[:, 0]
-            results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
-            results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
+            if is_qso_vs_rest:
+                results['y_galaxy_star {}'.format(features_label)] = y_pred_proba[:, 0]
+                results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
+            else:
+                results['y_galaxy {}'.format(features_label)] = y_pred_proba[:, 0]
+                results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
+                results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
 
     return results, models
 
@@ -255,13 +269,15 @@ def get_train_matrices(ztf_date, filter, minimum_timespan=None, timespan=None, f
     # Read the train data
     ztf_x_sdss, sdss_x_ztf = \
         get_train_data(ztf_date=ztf_date, filter=filter, data_subsets=['ZTF'], return_features=False)
-
+    print('Data read: {}'.format(len(ztf_x_sdss)))
+    
     # Make a sampling experiment
     n_obs_subsampled = None
     if timespan:
         ztf_x_sdss, sdss_x_ztf, n_obs_subsampled = subsample_light_curves(
             ztf_x_sdss, sdss_x_ztf, minimum_timespan=minimum_timespan,
             timespan=timespan, frac_n_obs=frac_n_obs)
+    print('Subsampled data: {}'.format(len(ztf_x_sdss)))
 
     # Change shape to feed a neural network and sample random 200 observations
     X_train, X_val, X_test, y_train, y_val, y_test, z_train, z_val, z_test = make_train_test_split(ztf_x_sdss, sdss_x_ztf)

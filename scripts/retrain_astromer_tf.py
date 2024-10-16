@@ -127,18 +127,20 @@ for X, y, label in [
 ]:
     n_classes = None if args.is_redshift else 3
 
-    batches_dict[label] = load_numpy(X,
-               labels=y,
-               batch_size=batch_size,
-               shuffle=False,
-               sampling=True,
-               max_obs=200,
-               msk_frac=0.,
-               rnd_frac=0.,
-               same_frac=0.,
-               repeat=1,
-               num_cls=n_classes,
-               is_redshift=args.is_redshift)
+    batches_dict[label] = load_numpy(
+        X,
+        labels=y,
+        batch_size=batch_size,
+        shuffle=False,
+        sampling=True,
+        max_obs=200,
+        msk_frac=0.,
+        rnd_frac=0.,
+        same_frac=0.,
+        repeat=1,
+        num_cls=n_classes,
+        is_redshift=args.is_redshift,
+    )
 
     # batches_dict[label] = make_pretraining(
     #     X, labels=y, n_classes=n_classes, batch_size=batch_size, shuffle=False,

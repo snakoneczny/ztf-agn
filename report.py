@@ -169,7 +169,7 @@ def plot_cls_light_curves(results_df, light_curves):
         plot_light_curves(lc_subset, results_subset)
 
 
-def plot_results_as_function(results_df, x, labels, with_accuracy=False):
+def plot_results_as_function(results_df, x, labels, with_accuracy=False, band='g'):
     plt.figure()
     
     # Make bins and get number of quasars in bins
@@ -216,7 +216,8 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False):
     # Plot a grey line with number of objects kind of in the background
     plt.plot(mid_points, n_qso, '--', label='QSO distribution', color='grey', alpha=0.5)
 
-    plt.xlabel(pretty_print(x))
+    plt.xlabel(pretty_print(x, band))
+    plt.ylabel('QSO F1 score')
     if x in ['n obs']:
         plt.xscale('log')
     legend_loc = {
@@ -238,7 +239,7 @@ def plot_confusion_matrix(y_test, y_pred, labels):
     plt.show()
 
 
-def plot_feature_ranking(features_dict, ztf_band, n_features=15, n_top_offsets=1, offset=0.142, title=None, annotation=None):
+def plot_feature_ranking(features_dict, ztf_band, n_features=10, n_top_offsets=1, offset=0.142, title=None, annotation=None):
     features, importances = features_dict['features'], features_dict['importances']
     importances = np.array(importances) * 100
 
@@ -251,7 +252,8 @@ def plot_feature_ranking(features_dict, ztf_band, n_features=15, n_top_offsets=1
 
     feature_printed = [pretty_print_features(x, ztf_band) for x in features_sorted]
 
-    fig, ax = plt.subplots(figsize=(6, 7))
+    y_size = 7 / 10 * n_features
+    fig, ax = plt.subplots(figsize=(6, y_size))
     ax.barh(range(len(features_sorted)), importances_sorted, align='center')  # , color=get_cubehelix_palette(1)[0])
     ax.set_yticks(range(len(features_sorted)))
 
@@ -266,7 +268,7 @@ def plot_feature_ranking(features_dict, ztf_band, n_features=15, n_top_offsets=1
         ax.text(value + offset_val, i + .1, '{:.2f}%'.format(value), color=color)
 
     ax.grid(False)
-    ax.text(0.918, 0.064, annotation, transform=ax.transAxes, ha='right', va='bottom', fontsize='large',
+    ax.text(0.93, 0.086, annotation, transform=ax.transAxes, ha='right', va='bottom', fontsize='large',
             bbox={'facecolor': 'white', 'alpha': 1.0, 'pad': 10})
     plt.title(title)
     plt.tight_layout()

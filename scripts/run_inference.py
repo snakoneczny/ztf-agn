@@ -33,7 +33,7 @@ date = ZTF_DATES['DR 20']
 test_size = 10000
 
 # Get a list of all the downloaded fields
-input_regex = 'ZTF/ZTF_{}/fields/ZTF_{}__field_*__{}-band.xz'.format(date, date, filter)
+input_regex = 'ZTF/ZTF_{}/fields/ZTF_{}__field_*__{}-band*.xz'.format(date, date, filter)
 input_paths = sorted(glob.glob(os.path.join(STORAGE_PATH, input_regex)))
 
 # Get names of the desired output files
