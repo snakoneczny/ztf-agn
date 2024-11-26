@@ -16,7 +16,7 @@ date = ZTF_DATES['DR 20']
 
 with open(os.path.join(DATA_PATH, 'ZTF/DR19_field_counts.json'), 'r') as file:
     fields = json.load(file)
-fields = [int(k) for k in fields.keys()]
+fields = [int(k) for k in fields if fields[k] > 0]
 
 for filter in [1]:
     filter_name = ZTF_FILTER_NAMES[filter]
@@ -26,6 +26,8 @@ for filter in [1]:
         file_name = os.path.join(DATA_PATH, file_name)
 
         if not os.path.exists(file_name):
+            print('Downloading field', field)
+            
             kowalski = Kowalski(
                 username=KOWALSKI_USERNAME,
                 password=KOWALSKI_PASSWORD,

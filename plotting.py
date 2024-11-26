@@ -61,14 +61,14 @@ def plot_light_curves(light_curves, stats):
 
         # Add statistics
         info = [
-            'ZTF id: ' + str(lc['id']),
+            # 'ZTF id: ' + str(lc['id']),
             'ra: ' + str(lc['ra'][0]),
             'dec: ' + str(lc['dec'][0]),
-            'class: {}'.format(stats.loc[idx, 'y_true']),
-            'redshift: {:.1f}'.format(stats.loc[idx, 'Z']),
-            'galaxy: {:.1f}%'.format(stats.loc[idx, 'y_galaxy ZTF + AstrmClf'] * 100),
-            'quasar: {:.1f}%'.format(stats.loc[idx, 'y_qso ZTF + AstrmClf'] * 100),
-            'star: {:.1f}%'.format(stats.loc[idx, 'y_star ZTF + AstrmClf'] * 100),
+            'class$_\mathrm{{SDSS}}$: {}'.format(stats.loc[idx, 'y_true']),
+            'redshift$_\mathrm{{SDSS}}$: {:.1f}'.format(stats.loc[idx, 'Z']),
+            'galaxy$_\mathrm{{ZTF}}$: {:.1f}%'.format(stats.loc[idx, 'y_galaxy ZTF + AstrmClf'] * 100),
+            'quasar$_\mathrm{{ZTF}}$: {:.1f}%'.format(stats.loc[idx, 'y_qso ZTF + AstrmClf'] * 100),
+            'star$_\mathrm{{ZTF}}$: {:.1f}%'.format(stats.loc[idx, 'y_star ZTF + AstrmClf'] * 100),
             # 'observations:  {}'.format(np.around(stats.loc[idx, 'n obs'])),
             # 'cadence:  ${:.1f}^{{+{:.1f}}}_{{-{:.1f}}}$ days'.format(
             #     stats.loc[idx, 'cadence median'], stats.loc[idx, 'cadence plus sigma'], stats.loc[idx, 'cadence minus sigma']),

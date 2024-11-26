@@ -3,40 +3,29 @@ import os
 import glob
 import gc
 
-import pandas as pd
-from astropy.table import Table, vstack
 from tqdm import tqdm
 
 sys.path.append('..')
 from env_config import DATA_PATH
-from utils import read_fits_to_pandas, save_fits
+from utils import read_fits_to_pandas
 
 
-catalogs = ['AllWISE']  # 'PS1_DR1', 'Gaia_EDR3'
+catalog = 'AllWISE'  # 'PS1_DR1', 'Gaia_EDR3'
+columns = ['ra', 'dec', 'w1mpro', 'w2mpro', 'w3mpro', 'w4mpro']
 
-# Read the chunks
-for catalog in catalogs:
-    # Get input paths sorted
-    input_regex = '{}/chunks/{}__*_*.fits'.format(catalog, catalog)
-    input_paths = sorted(glob.glob(os.path.join(DATA_PATH, input_regex)))    
-    chunk_starts = [int(input_path.split('__')[-1].split('_')[0]) for input_path in input_paths]
-    input_paths = [input_path for _, input_path in sorted(zip(chunk_starts, input_paths))]
+output_path = '{}/{}_reduced.csv'.format(catalog, catalog)
+output_path = os.path.join(DATA_PATH, output_path)
 
-    # Read and merge data
-    # data = read_fits_to_pandas(input_paths[0])
-    # for input_path in tqdm(input_paths[1:], '{} chunks'.format(catalog)):
-    #     data = pd.concat([data, read_fits_to_pandas(input_path)], ignore_index=True, axis=0)
-    #     # data = vstack([data, Table.read(input_path, format='fits')])
-    #     gc.collect()
-    data = read_fits_to_pandas(input_paths[0])
-    for input_path in tqdm(input_paths[1:]):
-        # TODO: pick the 4 bands detections
-        data = pd.concat([data, read_fits_to_pandas(input_path)])
-        gc.collect()
+# Get input paths sorted
+input_regex = '{}/chunks/{}__*_*.fits'.format(catalog, catalog)
+input_paths = sorted(glob.glob(os.path.join(DATA_PATH, input_regex)))    
+chunk_starts = [int(input_path.split('__')[-1].split('_')[0]) for input_path in input_paths]
+input_paths = [input_path for _, input_path in sorted(zip(chunk_starts, input_paths))]
 
-    # Save
-    file_path = os.path.join(DATA_PATH, '{}/{}.fits'.format(catalog, catalog))
-    save_fits(data, file_path, overwrite=True, with_print=True)
-    # data.write(file_path, overwrite=True)
-    print('Saved {}'.format(file_path))
+# Write first field overwriting previous file and starting with a header
+data = read_fits_to_pandas(input_paths[0], columns=columns)
+data.to_csv(output_path, header=True, index=False)
+for input_path in tqdm(input_paths[1:], 'Merging a catalog on disk'):
+    data = read_fits_to_pandas(input_path, columns=columns)
+    data.to_csv(output_path, mode='a', header=False, index=False)
     gc.collect()

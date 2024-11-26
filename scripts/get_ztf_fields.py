@@ -30,9 +30,6 @@ fields = [k for k in fields_dict if fields_dict[k] > 0]
 # test_fields = TEST_FIELDS
 # fields = [k for k in fields if k in test_fields]
 
-# Get a chunk of fields
-# fields = fields[:500]
-
 # Scan for files
 to_process, n_obj = [], []
 for field in fields:
@@ -58,8 +55,6 @@ with tqdm('Downloading data', total=all_data) as pbar:
         ids_file_name = os.path.join(DATA_PATH, ids_file_name)
 
         if not os.path.exists(output_file_name + '.xz') and os.path.exists(ids_file_name):
-            print('Processing filter: {}, field: {}'.format(filter_name, field))
-
             # Read the IDs
             with open(ids_file_name, 'rb') as file:
                 ids = np.load(file)
@@ -77,6 +72,7 @@ with tqdm('Downloading data', total=all_data) as pbar:
                 
                 # Check if a chunk file exists
                 if not os.path.exists(output_chunk_file_name + '.xz'):
+                    print('Processing filter: {}, field: {}, chunk {}'.format(filter_name, field, j))
                     
                     kowalski = Kowalski(
                         username=KOWALSKI_USERNAME,

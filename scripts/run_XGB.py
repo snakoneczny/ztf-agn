@@ -29,18 +29,18 @@ problem = 'z' if args.is_redshift else 'clf'
 # Run arguemtns
 ztf_date = ZTF_DATES['DR 20']
 filters = ['g']
-mag_limits = [True]
+mag_limits = [False]
 
 # Data subset, feature set
 data_compositions = [
     # Final catalog
     (['ZTF'], [
-        # ['ZTF', 'AstrmClf'],
-        # ['ZTF', 'AstrmClf', 'PS'],
-        # ['ZTF', 'AstrmClf', 'WISE'],
-        # ['ZTF', 'AstrmClf', 'GAIA'],
-        # ['ZTF', 'AstrmClf', 'PS', 'WISE'],
-        # ['ZTF', 'AstrmClf', 'PS', 'GAIA'],
+        ['ZTF', 'AstrmClf'],
+        ['ZTF', 'AstrmClf', 'PS'],
+        ['ZTF', 'AstrmClf', 'WISE'],
+        ['ZTF', 'AstrmClf', 'GAIA'],
+        ['ZTF', 'AstrmClf', 'PS', 'WISE'],
+        ['ZTF', 'AstrmClf', 'PS', 'GAIA'],
         ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
     ]),
     # Cross match comparisons
@@ -63,9 +63,9 @@ data_compositions = [
     # (['ZTF', 'PS', 'GAIA'], [
     #     ['ZTF', 'AstrmClf', 'PS', 'GAIA'],
     # ]),
-    (['ZTF', 'PS', 'WISE', 'GAIA'], [
-        ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
-    ]),
+    # (['ZTF', 'PS', 'WISE', 'GAIA'], [
+    #     ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
+    # ]),
 ]
 # Redshift
 if args.is_redshift:

@@ -9,6 +9,7 @@ import pandas as pd
 from ASTROMER.models import SingleBandEncoder
 from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, ModelCheckpoint, LearningRateScheduler
 from sklearn.metrics import accuracy_score, f1_score
+from scipy.special import softmax
 
 sys.path.append('..')
 from env_config import PROJECT_PATH
@@ -183,6 +184,7 @@ for label, y_true in [('train', y_train), ('val', y_val), ('test', y_test)]:
 
     # Make preds
     y_pred = model.predict(batches)
+    y_pred = softmax(y_pred, axis=1)
 
     # If train then undo the shuffling
     if label == 'train':

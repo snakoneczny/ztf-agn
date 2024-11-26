@@ -78,33 +78,36 @@ def add_colors(data, is_cross_features=False):
     for set_name in ['PS', 'WISE', 'GAIA']:
         set_name_tmp = 'GAIA mags' if set_name == 'GAIA' else set_name
         cols = FEATURES_DICT[set_name_tmp]
-        new_feature_names = []
-        for i in range(len(cols)):
-            for j in range(i + 1, len(cols)):
-                feature_name = '{}__{}-{}'.format(cols[i].split('__')[0], cols[i].split('__')[1],
-                                                  cols[j].split('__')[1])
-                data.loc[:, feature_name] = data.loc[:, cols[i]] - data.loc[:, cols[j]]
-                new_feature_names.append(feature_name)
-        new_feature_sets[set_name].extend(new_feature_names)
+        if cols[0] in data:
+            new_feature_names = []
+            for i in range(len(cols)):
+                for j in range(i + 1, len(cols)):
+                    feature_name = '{}__{}-{}'.format(cols[i].split('__')[0], cols[i].split('__')[1],
+                                                    cols[j].split('__')[1])
+                    data.loc[:, feature_name] = data.loc[:, cols[i]] - data.loc[:, cols[j]]
+                    new_feature_names.append(feature_name)
+            new_feature_sets[set_name].extend(new_feature_names)
 
     # Then, iterate through all possible combinations between the surveys
     if is_cross_features:
         to_iterate = ['ZTF', 'PS', 'WISE', 'GAIA']
         for i, survey_a in enumerate(to_iterate[:-1]):
             cols_a = FEATURES_DICT[survey_a]
-            
-            for survey_b in to_iterate[i + 1:]:
-                set_name = '{} - {}'.format(survey_a, survey_b)
-                survey_b_tmp = survey_b if survey_b != 'GAIA' else 'GAIA mags'
-                cols_b = FEATURES_DICT[survey_b_tmp] 
-                
-                feature_names = []
-                for feature_a in cols_a:
-                    for feature_b in cols_b:
-                        feature_name = '{}__minus__{}'.format(feature_a, feature_b)
-                        data.loc[:, feature_name] = data.loc[:, feature_a] - data.loc[:, feature_b]
-                        feature_names.append(feature_name)
-                new_feature_sets[set_name] = feature_names
+
+            if cols_a[0] in data:            
+                for survey_b in to_iterate[i + 1:]:
+                    set_name = '{} - {}'.format(survey_a, survey_b)
+                    survey_b_tmp = survey_b if survey_b != 'GAIA' else 'GAIA mags'
+                    cols_b = FEATURES_DICT[survey_b_tmp]
+                    
+                    if cols_b[0] in data:
+                        feature_names = []
+                        for feature_a in cols_a:
+                            for feature_b in cols_b:
+                                feature_name = '{}__minus__{}'.format(feature_a, feature_b)
+                                data.loc[:, feature_name] = data.loc[:, feature_a] - data.loc[:, feature_b]
+                                feature_names.append(feature_name)
+                        new_feature_sets[set_name] = feature_names
 
     return data, new_feature_sets
 
