@@ -77,6 +77,16 @@ def plot_light_curves(light_curves, stats):
         text_plot = plt.text(.02, .97, info, ha='left', va='top', transform=ax.transAxes)
         text_plot.set_bbox(dict(facecolor='white', alpha=0.8, edgecolor='grey'))
 
+        # Add letter indicator
+        letters = {0: 'a', 1: 'b', 2: 'c', 3: 'd', 4: 'e', 5: 'f', 6: 'g', 7: 'h'}
+        ax.annotate(
+            '({})'.format(letters[i]),
+            xy=(0.5, 0.07), xycoords='axes fraction',
+            xytext=(+0.5, -0.5), textcoords='offset fontsize',
+            fontsize='medium', verticalalignment='top', fontfamily='serif',
+            bbox=dict(facecolor='none', edgecolor='none', pad=3.0)
+        )
+        
         if i >= len(axs) - 2:
             ax.set_xlabel('date')
         if i % 2 == 0:
