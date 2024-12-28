@@ -1,12 +1,39 @@
 import random
 
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib import dates as mdates
 import seaborn as sns
 from astropy import time
 
 FILTER_COLORS = {'g': 'C2', 'r': 'C3', 'i': 'C4'}
+
+
+def plot_heatmaps(data_dict, filter='g'):
+    for to_plot in data_dict:
+        df = pd.DataFrame.from_records(to_plot[0][filter], columns=['magnitude', 'number of observations', to_plot[1]])
+        df = df.loc[(df['magnitude'] >= 18.50) & (df['magnitude'] <= 21.75)]
+
+        pivot = df.pivot(columns='number of observations', index='magnitude', values=to_plot[1])
+
+        fig, ax = plt.subplots(figsize=(5, 6))
+
+        fmt = '.2f' if to_plot[1] == 'QSO F1 score' else '.0f'
+        cmap = 'coolwarm_r' if to_plot[1] == 'QSO F1 score' else 'Blues'
+        g = sns.heatmap(pivot, annot=True, ax=ax, cbar=False, cmap=cmap, fmt=fmt)
+
+        x = np.arange(0, 5.1, 0.1)
+        y = x + 9
+        plt.plot(x, y, 'r--', alpha=0.5)
+        
+        y_labels = ['{:.2f}'.format(float(t.get_text())) for t in ax.get_yticklabels()]
+        g.set_yticklabels(y_labels)
+
+        plt.gca().invert_xaxis()
+        plt.tight_layout()
+        plt.title(to_plot[1])
+        plt.show()
 
 
 def plot_embedding(data, feature_labels):
