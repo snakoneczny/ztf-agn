@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 def pretty_print(x, band=None):
     if x == 'mag median':
         return 'ZTF ${}$-band median magnitude'.format(band)
+    elif x == 'mag err mean':
+        return 'ZTF ${}$-band mean magnitude error'.format(band)
     pretty_dict = {
         'Z': 'redshift',
         'n obs': 'number of observation epochs',

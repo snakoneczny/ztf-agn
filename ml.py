@@ -11,6 +11,7 @@ from xgboost import XGBClassifier, XGBRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
+from sklearn.metrics import accuracy_score, f1_score
 
 from env_config import DATA_PATH, PROJECT_PATH
 from features import FEATURES_DICT, get_features
@@ -153,6 +154,17 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
                 results['y_galaxy {}'.format(features_label)] = y_pred_proba[:, 0]
                 results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
                 results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
+
+        # Print basic stats, QSO F1 and 3-class accuracy
+        print('I am here')
+        cls_dict = {0: 'GALAXY/STAR', 1: 'QSO'} if is_qso_vs_rest else {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
+        tmp = [cls_dict[x] for x in y_dict['test']]
+        qso_f1 = f1_score(
+            tmp, y_pred_cls, average=None, zero_division=0, labels=['GALAXY', 'QSO', 'STAR'],
+        )[1]
+        accuracy = accuracy_score(tmp, y_pred_cls)
+        print('Data: {}, features: {}'.format(data_labels, feature_sets))
+        print('QSO F1: {:.5f}, accuracy: {:.5f}'.format(qso_f1, accuracy))
 
     return results, models
 

@@ -16,7 +16,8 @@ def redshift_report(results, features_label, z_max=5, title=None):
     z_pred = results['z_pred ' + features_label]
     z_err = np.mean(abs(z_true - z_pred) / (1 + z_true))
 
-    ax = sns.displot(x=z_true, y=z_pred)
+    # ax = sns.displot(x=z_true, y=z_pred, kind='kde', levels=[.01, .05, .1, .68, .95], rug=True)
+    ax = sns.displot(x=z_true, y=z_pred, cbar=True)
     plt.plot(range(z_max + 1), range(z_max + 1), '-')
 
     text = '$\\frac{|z_{\mathrm{spec}} - z_{\mathrm{pred}}|}{1 + z_{\mathrm{spec}}} = ' + str(np.round(z_err, 2)) + '$'
@@ -184,7 +185,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False, band='g
     n_qso = groups.apply(lambda x: x.loc[x['y_true'] == 'QSO'].shape[0])
     
     # Make mask based on number of quasars
-    mask = n_qso >= 10
+    mask = n_qso >= 20
     mid_points = mid_points[mask]
 
     min, max = 1, 0
@@ -220,6 +221,7 @@ def plot_results_as_function(results_df, x, labels, with_accuracy=False, band='g
         plt.xscale('log')
     legend_loc = {
         'mag median': 'lower center',
+        'mag err mean': 'lower center',
         'redshift': 'lower center',
         'n obs': 'lower center',
         'cadence mean': 'lower center',
