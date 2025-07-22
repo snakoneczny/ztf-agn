@@ -156,7 +156,6 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
                 results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
 
         # Print basic stats, QSO F1 and 3-class accuracy
-        print('I am here')
         cls_dict = {0: 'GALAXY/STAR', 1: 'QSO'} if is_qso_vs_rest else {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
         tmp = [cls_dict[x] for x in y_dict['test']]
         qso_f1 = f1_score(

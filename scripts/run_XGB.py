@@ -34,15 +34,17 @@ mag_limits = [False]
 # Data subset, feature set
 data_compositions = [
     # Final catalog
-    # (['ZTF'], [
-    #     ['ZTF', 'AstrmClf'],
-    #     ['ZTF', 'AstrmClf', 'PS'],
-    #     ['ZTF', 'AstrmClf', 'WISE'],
-    #     ['ZTF', 'AstrmClf', 'GAIA'],
-    #     ['ZTF', 'AstrmClf', 'PS', 'WISE'],
-    #     ['ZTF', 'AstrmClf', 'PS', 'GAIA'],
-    #     ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
-    # ]),
+    (['ZTF'], [
+        ['ZTF', 'AstrmClf'],
+        ['ZTF', 'AstrmClf', 'PS'],
+        ['ZTF', 'AstrmClf', 'WISE'],
+        ['ZTF', 'AstrmClf', 'GAIA'],
+        ['ZTF', 'AstrmClf', 'PS', 'WISE'],
+        ['ZTF', 'AstrmClf', 'PS', 'GAIA'],
+        ['ZTF', 'AstrmClf', 'WISE', 'GAIA'],
+        ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
+        # ['PS', 'WISE', 'GAIA'],
+    ]),
     # Cross match comparisons
     # (['ZTF', 'PS'], [
     #     ['ZTF', 'AstrmClf'],
@@ -66,10 +68,7 @@ data_compositions = [
     # (['ZTF', 'PS', 'WISE', 'GAIA'], [
     #     ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
     # ]),
-    # Review request
-    (['ZTF'], [
-        ['PS', 'WISE', 'GAIA'],
-    ]),
+    # 
 ]
 # Redshift
 if args.is_redshift:
@@ -164,7 +163,13 @@ for is_mag_limit in mag_limits:
                         else:
                             feature_labels_list = [
                                 ['ZTF', 'AstrmClf'],
+                                ['ZTF', 'AstrmClf', 'PS'],
                                 ['ZTF', 'AstrmClf', 'WISE'],
+                                ['ZTF', 'AstrmClf', 'GAIA'],
+                                ['ZTF', 'AstrmClf', 'PS', 'WISE'],
+                                ['ZTF', 'AstrmClf', 'PS', 'GAIA'],
+                                ['ZTF', 'AstrmClf', 'WISE', 'GAIA'],
+                                ['ZTF', 'AstrmClf', 'PS', 'WISE', 'GAIA'],
                             ]
                         for feature_labels in feature_labels_list:
                             feature_label = ' + '.join(feature_labels)
