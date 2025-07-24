@@ -77,9 +77,9 @@ if args.is_redshift:
         (['ZTF'], [
             ['ZTF', 'WISE'],
         ]),
-        (['ZTF', 'WISE'], [
-            ['ZTF', 'WISE'],
-        ]),
+        # (['ZTF', 'WISE'], [
+        #     ['ZTF', 'WISE'],
+        # ]),
     ]
 
 # Read the train data

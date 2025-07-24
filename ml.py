@@ -155,15 +155,15 @@ def run_experiments(data_labels, feature_labels, master_df, features_dict, filte
                 results['y_qso {}'.format(features_label)] = y_pred_proba[:, 1]
                 results['y_star {}'.format(features_label)] = y_pred_proba[:, 2]
 
-        # Print basic stats, QSO F1 and 3-class accuracy
-        cls_dict = {0: 'GALAXY/STAR', 1: 'QSO'} if is_qso_vs_rest else {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
-        tmp = [cls_dict[x] for x in y_dict['test']]
-        qso_f1 = f1_score(
-            tmp, y_pred_cls, average=None, zero_division=0, labels=['GALAXY', 'QSO', 'STAR'],
-        )[1]
-        accuracy = accuracy_score(tmp, y_pred_cls)
-        print('Data: {}, features: {}'.format(data_labels, feature_sets))
-        print('QSO F1: {:.5f}, accuracy: {:.5f}'.format(qso_f1, accuracy))
+            # Print basic stats, QSO F1 and 3-class accuracy
+            cls_dict = {0: 'GALAXY/STAR', 1: 'QSO'} if is_qso_vs_rest else {0: 'GALAXY', 1: 'QSO', 2: 'STAR'}
+            tmp = [cls_dict[x] for x in y_dict['test']]
+            qso_f1 = f1_score(
+                tmp, y_pred_cls, average=None, zero_division=0, labels=['GALAXY', 'QSO', 'STAR'],
+            )[1]
+            accuracy = accuracy_score(tmp, y_pred_cls)
+            print('Data: {}, features: {}'.format(data_labels, feature_sets))
+            print('QSO F1: {:.5f}, accuracy: {:.5f}'.format(qso_f1, accuracy))
 
     return results, models
 
